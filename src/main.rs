@@ -39,15 +39,17 @@ fn main() {
     let output = output.to_str().unwrap();
 
     if filename.ends_with(".lvl_setup.bin") {
+        let output = format!("{}.yaml", output);
         match SetupFile::read_bin(filename) {
-            Ok(file) => file.write_yaml(output),
+            Ok(file) => file.write_yaml(&output),
             Err(e) => panic!("{:?}", e)
         };
     } else if filename.ends_with(".yaml") {
         SetupFile::read_yaml(filename).write_bin(filename);
     } else if filename.ends_with(".lvl.bin") {
+        let output = format!("{}.yaml", output);
         match Level::read_bin(filename) {
-            Ok(file) => file.write_yaml(output),
+            Ok(file) => file.write_yaml(&output),
             Err(e) => panic!("{:?}", e)
         };
     } else {

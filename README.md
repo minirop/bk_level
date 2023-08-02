@@ -1,5 +1,6 @@
-bk_levels
-=========
+# bk_level
+
+## LEVEL GEOMETRY:
 
 * Open the desired level in Banjo's Backpack
 * Close BB
@@ -9,3 +10,9 @@ bk_levels
 * Rename them to <name>.lvl.bin
 * Execute the programme with <name>.lvl.bin as the sole argument
 * You'll get .obj, .mtl, and .png files
+
+## SETUP FILE:
+
+* Same steps as above but look at the field `pointer`
+* Rename the file as <name>.lvl_setup.bin
+* You'll get a YAML file
