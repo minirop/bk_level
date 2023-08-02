@@ -56,23 +56,28 @@ pub enum ComplexObject {
     Actor { x: u16, y: u16, z: u16,
         script: u16, object: u16, unk_0a: u8,
         unk_0b: u8, rotation: u16, unk_0d: u8,
-        current: u16, next: u16, end_indicator: u8 },
+        size: u16, current: u16, next: u16,
+        end_indicator: u8 },
     Timed { x: u16, y: u16, z: u16,
         script: u16, object: u16, unk_0a: u8,
         unk_0b: u8, timer: u8, unk_0d: u8,
+        unk_0e: u8, unk_0f: u8,
         current: u16, next: u16, end_indicator: u8 },
     Script { x: u16, y: u16, z: u16,
         script: u16, object: u16, unk_0a: u8,
         unk_0b: u8, unk_0c: u8, unk_0d: u8,
+        unk_0e: u8, unk_0f: u8,
         current: u16, next: u16, end_indicator: u8 },
     Radius { x: u16, y: u16, z: u16,
         radius: u16, object: u8, associated: u16,
         unk_0a: u8, unk_0b: u8, unk_0c: u8,
-        unk_0d: u8, current: u16, next: u16,
+        unk_0d: u8, unk_0e: u8, unk_0f: u8,
+        current: u16, next: u16,
         end_indicator: u8 },
     Unknown { x: u16, y: u16, z: u16,
         script: u16, object: u16, unk_0a: u8,
         unk_0b: u8, unk_0c: u8, unk_0d: u8,
+        unk_0e: u8, unk_0f: u8,
         current: u16, next: u16, end_indicator: u8 },
 }
 
@@ -176,7 +181,8 @@ impl SetupFile {
                         let unk_0b = f.read_u8()?;
                         let unk_0c = f.read_u8()?;
                         let unk_0d = f.read_u8()?;
-                        let size = f.read_u16::<BigEndian>()?;
+                        let unk_0e = f.read_u8()?;
+                        let unk_0f = f.read_u8()?;
                         let c = f.read_u8()? as u16;
                         let cn = f.read_u16::<BigEndian>()?;
                         let end_indicator = f.read_u8()?;
@@ -186,11 +192,13 @@ impl SetupFile {
 
                         if ACTORS_ID.contains(&object) {
                             let rotation = (unk_0c as u16) * 2;
+                            let size = ((unk_0e as u16) << 8) + (unk_0f as u16);
 
                             voxel.complex_objects.push(ComplexObject::Actor {
                                 x, y, z,
                                 script, object, unk_0a, unk_0b,
-                                rotation, unk_0d, current, next, end_indicator
+                                rotation, unk_0d, size,
+                                current, next, end_indicator
                             });
                         } else if TIMERS_ID.contains(&object) {
                             let timer = unk_0c;
@@ -198,13 +206,15 @@ impl SetupFile {
                             voxel.complex_objects.push(ComplexObject::Timed {
                                 x, y, z,
                                 script, object, unk_0a, unk_0b,
-                                timer, unk_0d, current, next, end_indicator
+                                timer, unk_0d, unk_0e, unk_0f,
+                                current, next, end_indicator
                             });
                         } else if SCRIPTS_ID.contains(&object) {
                             voxel.complex_objects.push(ComplexObject::Script {
                                 x, y, z,
                                 script, object, unk_0a, unk_0b,
-                                unk_0c, unk_0d, current, next, end_indicator
+                                unk_0c, unk_0d, unk_0e, unk_0f,
+                                current, next, end_indicator
                             });
                         } else {
                             let associated = object;
@@ -215,7 +225,8 @@ impl SetupFile {
                                     voxel.complex_objects.push(ComplexObject::Radius {
                                         x, y, z,
                                         radius, object, associated,
-                                        unk_0a, unk_0b, unk_0c, unk_0d,
+                                        unk_0a, unk_0b, unk_0c,
+                                        unk_0d, unk_0e, unk_0f,
                                         current, next,
                                         end_indicator
                                     });
@@ -224,7 +235,8 @@ impl SetupFile {
                                     voxel.complex_objects.push(ComplexObject::Unknown {
                                         x, y, z,
                                         script, object: associated, unk_0a, unk_0b,
-                                        unk_0c, unk_0d, current, next, end_indicator
+                                        unk_0c, unk_0d, unk_0e, unk_0f, current,
+                                        next, end_indicator
                                     });
                                 }
                             };
