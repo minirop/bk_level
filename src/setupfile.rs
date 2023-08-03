@@ -38,11 +38,11 @@ pub struct Vector3 {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Camera {
-    Type0,
-    Type1(Vector3, Vector2, Vector2, Vector3, f32),
-    Type2(Vector3, Vector3),
-    Type3(Vector3, Vector2, Vector2, Vector3, f32, Vector2),
-    Type4(u32),
+    Type0 { id: u16 },
+    Type1 { id: u16, position: Vector3, speed: Vector2, rot_acc: Vector2, angles: Vector3, unk: u32 },
+    Type2 { id: u16, position: Vector3, angles: Vector3 },
+    Type3 { id: u16, position: Vector3, speed: Vector2, rot_acc: Vector2, angles: Vector3, unk: u32, distances: Vector2 },
+    Type4 { id: u16 },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -122,43 +122,18 @@ impl SetupFile {
         let y_voxel_count = negative_y_voxel_count.abs() + positive_y_voxel_count + 1;
         let z_voxel_count = negative_z_voxel_count.abs() + positive_z_voxel_count + 1;
 
-        let mut num10 = 0;
-        let mut num11 = 0;
-        let mut yz_voxel_count = y_voxel_count*z_voxel_count;
-        let mut num13 = 0;
-        let mut num14 = 0;
-        let mut num15 = 0;
-        let mut num16 = 0;
-        let mut num17 = 0;
-
-        let mut index = 0;
-        let mut zone_id = 0;
-
         let mut cameras = vec![];
         let mut voxels = vec![];
 
-        //while zone_id < x_voxel_count*y_voxel_count*z_voxel_count {
+        let mut previous_voxel_was_non_empty = false;
+
         let file_size = std::fs::metadata(filename).unwrap().len();
         while f.seek(SeekFrom::Current(0))? < file_size {
-            if num13 > yz_voxel_count {
-                num13 = 0;
-                num11 += 1;
-                num14 += 1;
-                num15 = 0;
-            }
-            if num13 - num16 * z_voxel_count > z_voxel_count {
-                if num16 < z_voxel_count {
-                    num16 += 1;
-                }
-                if num16 >= z_voxel_count - 1 {
-                    num16 = 0;
-                    num15 += 1;
-                }
-            }
-
             let header = f.read_u8()?;
 
             if header == 3 { // Start Of A Voxel With Objects
+                previous_voxel_was_non_empty = true;
+
                 let subheader = f.read_u8()?;
                 assert_eq!(subheader, 10);
 
@@ -241,8 +216,6 @@ impl SetupFile {
                                 }
                             };
                         }
-
-                        zone_id += 1;
                     }
 
                     list_type = f.read_u8()?;
@@ -290,15 +263,16 @@ impl SetupFile {
 
                 let mut start_of_camera = f.read_u8()?;
                 while start_of_camera == 1 {
-                    let camera_id = f.read_u16::<BigEndian>()?;
-                    let camera_unk = f.read_u8()?;
+                    let id = f.read_u16::<BigEndian>()?;
+                    let camera_two = f.read_u8()?;
+                    assert_eq!(camera_two, 2);
                     let camera_type = f.read_u8()?;
 
                     let camera = match camera_type {
                         1 | 3 => {
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 1);
-                            let pos = read_3_floats(&mut f);
+                            let position = read_3_floats(&mut f);
 
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 2);
@@ -314,35 +288,36 @@ impl SetupFile {
                             
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 5);
-                            let unk = f.read_f32::<BigEndian>()?;
+                            let unk = f.read_u32::<BigEndian>()?;
 
                             if camera_type == 3 {
                                 let section_id = f.read_u8()?;
                                 assert_eq!(section_id, 6);
-                                let dist = read_2_floats(&mut f);
+                                let distances = read_2_floats(&mut f);
 
-                                Camera::Type3(pos, speed, rot_acc, angles, unk, dist)
+                                Camera::Type3 { id, position, speed, rot_acc, angles, unk, distances }
                             } else {
-                                Camera::Type1(pos, speed, rot_acc, angles, unk)
+                                Camera::Type1 { id, position, speed, rot_acc, angles, unk }
                             }
                         },
                         2 => {
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 1);
-                            let pos = read_3_floats(&mut f);
+                            let position = read_3_floats(&mut f);
 
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 2);
                             let angles = read_3_floats(&mut f);
 
-                            Camera::Type2(pos, angles)
+                            Camera::Type2 { id, position, angles }
                         },
                         4 => {
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 1);
-                            let unk = f.read_u32::<BigEndian>()?;
+                            let one = f.read_u32::<BigEndian>()?;
+                            assert_eq!(one, 1);
 
-                            Camera::Type4(unk)
+                            Camera::Type4 { id }
                         },
                         _ => panic!("camera_type: {:?}", camera_type)
                     };
@@ -363,12 +338,17 @@ impl SetupFile {
                 start_of_lighting = f.read_u8()?;
                 assert_eq!(start_of_lighting, 0);
             } else if header == 1 {
-                // skip
+                if previous_voxel_was_non_empty {
+                    previous_voxel_was_non_empty = false;
+                } else {
+                    voxels.push(Voxel {
+                        complex_objects: vec![],
+                        small_objects: vec![],
+                    });
+                }
             } else {
                 panic!("> header = 0x{:X}", header);
             }
-
-            num13 += 1;
         }
 
         Ok(SetupFile {
