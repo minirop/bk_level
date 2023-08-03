@@ -15,4 +15,9 @@
 
 * Same steps as above but look at the field `pointer`
 * Rename the file as <name>.lvl_setup.bin
-* You'll get a YAML file
+* You'll get <name>.lvl_setup.yaml
+
+## REPACK SETUP FILE:
+
+* execute the programme with <name>.lvl_setup.yaml
+* You'll get <name>.lvl_setup_repack.bin

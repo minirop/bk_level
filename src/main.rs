@@ -45,7 +45,8 @@ fn main() {
             Err(e) => panic!("{:?}", e)
         };
     } else if filename.ends_with(".yaml") {
-        SetupFile::read_yaml(filename).write_bin(filename);
+        let output = format!("{}_repack.bin", output);
+        SetupFile::read_yaml(filename).write_bin(&output).unwrap();
     } else if filename.ends_with(".lvl.bin") {
         let output = format!("{}.yaml", output);
         match Level::read_bin(filename) {

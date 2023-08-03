@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
-use byteorder::{ReadBytesExt, BigEndian};
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use clap::Parser;
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
@@ -21,6 +21,7 @@ use std::io::Write;
 pub struct SetupFile {
     pub cameras: Vec<Camera>,
     pub voxels: Vec<Voxel>,
+    pub lightings: Vec<Lighting>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -30,25 +31,26 @@ pub struct Vector2 {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Vector3 {
-    x: f32,
-    y: f32,
-    z: f32,
+pub struct Vector3<T> {
+    x: T,
+    y: T,
+    z: T,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Camera {
     Type0 { id: u16 },
-    Type1 { id: u16, position: Vector3, speed: Vector2, rot_acc: Vector2, angles: Vector3, unk: u32 },
-    Type2 { id: u16, position: Vector3, angles: Vector3 },
-    Type3 { id: u16, position: Vector3, speed: Vector2, rot_acc: Vector2, angles: Vector3, unk: u32, distances: Vector2 },
-    Type4 { id: u16 },
+    Type1 { id: u16, position: Vector3<f32>, speed: Vector2, rot_acc: Vector2, angles: Vector3<f32>, unk: u32 },
+    Type2 { id: u16, position: Vector3<f32>, angles: Vector3<f32> },
+    Type3 { id: u16, position: Vector3<f32>, speed: Vector2, rot_acc: Vector2, angles: Vector3<f32>, unk: u32, distances: Vector2 },
+    Type4 { id: u16, unk: u32 },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum SmallObject {
-    Sprite(u16, u16, u16, u16, u16, u16),
-    Static(u16, u8, u8, u16, u16, u16, u8, u8),
+    Sprite { object: u16, size: u16, x: u16, y: u16, z: u16, unk1: u8, unk2: u8 },
+    Static { object: u16, y_rot: u8, xz_rot: u8, x: u16, y: u16, z: u16, size: u8, unk: u8 },
+    Unknown { object: u16, unk1: u8, unk2: u8, unk3: u8, unk4: u8, unk5: u8, unk6: u8, unk7: u8, unk8: u8, unk9: u8, unk10: u8 },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -83,8 +85,17 @@ pub enum ComplexObject {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Voxel {
+    pub position: Vector3<i32>,
     pub complex_objects: Vec<ComplexObject>,
     pub small_objects: Vec<SmallObject>,
+    pub missing: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Lighting {
+    position: Vector3<f32>,
+    unk: Vector2,
+    colours: Vector3<u32>,
 }
 
 fn read_2_floats(f: &mut File) -> Vector2 {
@@ -93,11 +104,279 @@ fn read_2_floats(f: &mut File) -> Vector2 {
     Vector2 { x, y }
 }
 
-fn read_3_floats(f: &mut File) -> Vector3 {
+fn read_3_floats(f: &mut File) -> Vector3<f32> {
     let x = f.read_f32::<BigEndian>().unwrap();
     let y = f.read_f32::<BigEndian>().unwrap();
     let z = f.read_f32::<BigEndian>().unwrap();
     Vector3 { x, y, z }
+}
+
+fn read_3_u32(f: &mut File) -> Vector3<u32> {
+    let x = f.read_u32::<BigEndian>().unwrap();
+    let y = f.read_u32::<BigEndian>().unwrap();
+    let z = f.read_u32::<BigEndian>().unwrap();
+    Vector3 { x, y, z }
+}
+
+fn write_2_floats(f: &mut File, vec: &Vector2) {
+    f.write_f32::<BigEndian>(vec.x).unwrap();
+    f.write_f32::<BigEndian>(vec.y).unwrap();
+}
+
+fn write_3_floats(f: &mut File, vec: &Vector3<f32>) {
+    f.write_f32::<BigEndian>(vec.x).unwrap();
+    f.write_f32::<BigEndian>(vec.y).unwrap();
+    f.write_f32::<BigEndian>(vec.z).unwrap();
+}
+
+fn write_3_u32(f: &mut File, vec: &Vector3<u32>) {
+    f.write_u32::<BigEndian>(vec.x).unwrap();
+    f.write_u32::<BigEndian>(vec.y).unwrap();
+    f.write_u32::<BigEndian>(vec.z).unwrap();
+}
+
+fn write_voxel(f: &mut File, voxel: &Voxel) -> std::io::Result<()> {
+    let has_complex = voxel.complex_objects.len() > 0;
+    let has_small = voxel.small_objects.len() > 0;
+
+    if !voxel.missing {
+        f.write_u8(3)?;
+        f.write_u8(10)?;
+        f.write_u8(voxel.complex_objects.len() as u8)?;
+
+        if has_complex {
+            f.write_u8(11)?;
+
+            let mut nx: u16 = 0;
+            let mut ny: u16 = 0;
+            let mut nz: u16 = 0;
+            let mut nscript: u16 = 0;
+            let mut nobject: u16 = 0;
+            let mut nunk_0a: u8 = 0;
+            let mut nunk_0b: u8 = 0;
+            let mut nunk_0c: u8 = 0;
+            let mut nunk_0d: u8 = 0;
+            let mut nunk_0e: u8 = 0;
+            let mut nunk_0f: u8 = 0;
+            let mut ncurrent: u16 = 0;
+            let mut nnext: u16 = 0;
+            let mut nend: u8 = 0;
+
+            for complex in &voxel.complex_objects {
+                match complex {
+                    ComplexObject::Actor { x, y, z, script, object, unk_0a, unk_0b, rotation, unk_0d, size, current, next, end_indicator } => {
+                        nx = *x;
+                        ny = *y;
+                        nz = *z;
+                        nscript = *script;
+                        nobject = *object;
+                        nunk_0a = *unk_0a;
+                        nunk_0b = *unk_0b;
+                        nunk_0c = (*rotation / 2) as u8;
+                        nunk_0d = *unk_0d;
+                        nunk_0e = (*size >> 8) as u8;
+                        nunk_0f = (*size & 0xFF) as u8;
+                        ncurrent = *current;
+                        nnext = *next;
+                        nend = *end_indicator;
+                    },
+                    ComplexObject::Timed { x, y, z, script, object, unk_0a, unk_0b, timer, unk_0d, unk_0e, unk_0f, current, next, end_indicator } => {
+                        nx = *x;
+                        ny = *y;
+                        nz = *z;
+                        nscript = *script;
+                        nobject = *object;
+                        nunk_0a = *unk_0a;
+                        nunk_0b = *unk_0b;
+                        nunk_0c = *timer;
+                        nunk_0d = *unk_0d;
+                        nunk_0e = *unk_0e;
+                        nunk_0f = *unk_0f;
+                        ncurrent = *current;
+                        nnext = *next;
+                        nend = *end_indicator;
+                    },
+                    ComplexObject::Script { x, y, z, script, object, unk_0a, unk_0b, unk_0c, unk_0d, unk_0e, unk_0f, current, next, end_indicator } => {
+                        nx = *x;
+                        ny = *y;
+                        nz = *z;
+                        nscript = *script;
+                        nobject = *object;
+                        nunk_0a = *unk_0a;
+                        nunk_0b = *unk_0b;
+                        nunk_0c = *unk_0c;
+                        nunk_0d = *unk_0d;
+                        nunk_0e = *unk_0e;
+                        nunk_0f = *unk_0f;
+                        ncurrent = *current;
+                        nnext = *next;
+                        nend = *end_indicator;
+                    },
+                    ComplexObject::Radius { x, y, z, radius, object, associated, unk_0a, unk_0b, unk_0c, unk_0d, unk_0e, unk_0f, current, next, end_indicator } => {
+                        nx = *x;
+                        ny = *y;
+                        nz = *z;
+                        nscript = ((*radius / 2) << 8) + (*object as u16);
+                        nobject = *associated;
+                        nunk_0a = *unk_0a;
+                        nunk_0b = *unk_0b;
+                        nunk_0c = *unk_0c;
+                        nunk_0d = *unk_0d;
+                        nunk_0e = *unk_0e;
+                        nunk_0f = *unk_0f;
+                        ncurrent = *current;
+                        nnext = *next;
+                        nend = *end_indicator;
+                    },
+                    ComplexObject::Unknown { x, y, z, script, object, unk_0a, unk_0b, unk_0c, unk_0d, unk_0e, unk_0f, current, next, end_indicator } => {
+                        nx = *x;
+                        ny = *y;
+                        nz = *z;
+                        nscript = *script;
+                        nobject = *object;
+                        nunk_0a = *unk_0a;
+                        nunk_0b = *unk_0b;
+                        nunk_0c = *unk_0c;
+                        nunk_0d = *unk_0d;
+                        nunk_0e = *unk_0e;
+                        nunk_0f = *unk_0f;
+                        ncurrent = *current;
+                        nnext = *next;
+                        nend = *end_indicator;
+                    },
+                };
+
+                let nc = (ncurrent >> 4) as u8;
+                let ncn = (ncurrent << 12) + nnext;
+
+                f.write_u16::<BigEndian>(nx)?;
+                f.write_u16::<BigEndian>(ny)?;
+                f.write_u16::<BigEndian>(nz)?;
+                f.write_u16::<BigEndian>(nscript)?;
+                f.write_u16::<BigEndian>(nobject)?;
+                f.write_u8(nunk_0a)?;
+                f.write_u8(nunk_0b)?;
+                f.write_u8(nunk_0c)?;
+                f.write_u8(nunk_0d)?;
+                f.write_u8(nunk_0e)?;
+                f.write_u8(nunk_0f)?;
+                f.write_u8(nc)?;
+                f.write_u16::<BigEndian>(ncn)?;
+                f.write_u8(nend)?;
+            }
+        }
+
+        f.write_u8(8)?;
+        f.write_u8(voxel.small_objects.len() as u8)?;
+
+        if voxel.small_objects.len() > 0 {
+            f.write_u8(9)?;
+
+            for small in &voxel.small_objects {
+                match small {
+                    SmallObject::Sprite { object, size, x, y, z, unk1, unk2 } => {
+                        f.write_u16::<BigEndian>(*object)?;
+                        f.write_u16::<BigEndian>(*size)?;
+                        f.write_u16::<BigEndian>(*x)?;
+                        f.write_u16::<BigEndian>(*y)?;
+                        f.write_u16::<BigEndian>(*z)?;
+                        f.write_u8(*unk1)?;
+                        f.write_u8(*unk2)?;
+                    },
+                    SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk } => {
+                        f.write_u16::<BigEndian>(*object)?;
+                        f.write_u8(*y_rot)?;
+                        f.write_u8(*xz_rot)?;
+                        f.write_u16::<BigEndian>(*x)?;
+                        f.write_u16::<BigEndian>(*y)?;
+                        f.write_u16::<BigEndian>(*z)?;
+                        f.write_u8(*size)?;
+                        f.write_u8(*unk)?;
+                    },
+                    SmallObject::Unknown { object, unk1, unk2, unk3, unk4, unk5, unk6, unk7, unk8, unk9, unk10 } => {
+                        f.write_u16::<BigEndian>(*object)?;
+                        f.write_u8(*unk1)?;
+                        f.write_u8(*unk2)?;
+                        f.write_u8(*unk3)?;
+                        f.write_u8(*unk4)?;
+                        f.write_u8(*unk5)?;
+                        f.write_u8(*unk6)?;
+                        f.write_u8(*unk7)?;
+                        f.write_u8(*unk8)?;
+                        f.write_u8(*unk9)?;
+                        f.write_u8(*unk10)?;
+                    },
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn write_camera(f: &mut File, camera: &Camera) -> std::io::Result<()> {
+    match camera {
+        Camera::Type0 { id } => {
+            f.write_u16::<BigEndian>(*id)?;
+            f.write_u8(2)?;
+        },
+        Camera::Type1 { id, position, speed, rot_acc, angles, unk } => {
+            f.write_u16::<BigEndian>(*id)?;
+            f.write_u8(2)?;
+            f.write_u8(1)?;
+
+            f.write_u8(1)?;
+            write_3_floats(f, position);
+            f.write_u8(2)?;
+            write_2_floats(f, speed);
+            f.write_u8(3)?;
+            write_2_floats(f, rot_acc);
+            f.write_u8(4)?;
+            write_3_floats(f, angles);
+            f.write_u8(5)?;
+            f.write_u32::<BigEndian>(*unk)?;
+        },
+        Camera::Type2 { id, position, angles } => {
+            f.write_u16::<BigEndian>(*id)?;
+            f.write_u8(2)?;
+            f.write_u8(2)?;
+
+            f.write_u8(1)?;
+            write_3_floats(f, position);
+            f.write_u8(2)?;
+            write_3_floats(f, angles);
+        },
+        Camera::Type3 { id, position, speed, rot_acc, angles, unk, distances } => {
+            f.write_u16::<BigEndian>(*id)?;
+            f.write_u8(2)?;
+            f.write_u8(3)?;
+
+            f.write_u8(1)?;
+            write_3_floats(f, position);
+            f.write_u8(2)?;
+            write_2_floats(f, speed);
+            f.write_u8(3)?;
+            write_2_floats(f, rot_acc);
+            f.write_u8(4)?;
+            write_3_floats(f, angles);
+            f.write_u8(5)?;
+            f.write_u32::<BigEndian>(*unk)?;
+            f.write_u8(6)?;
+            write_2_floats(f, distances);
+        },
+        Camera::Type4 { id, unk } => {
+            f.write_u16::<BigEndian>(*id)?;
+            f.write_u8(2)?;
+            f.write_u8(4)?;
+
+            f.write_u8(1)?;
+            f.write_u32::<BigEndian>(*unk)?;
+        },
+    }
+
+    f.write_u8(0)?;
+
+    Ok(())
 }
 
 // complex objects
@@ -124,22 +403,42 @@ impl SetupFile {
 
         let mut cameras = vec![];
         let mut voxels = vec![];
+        let mut lightings = vec![];
 
-        let mut previous_voxel_was_non_empty = false;
+        let mut loc_x = negative_x_voxel_count;
+        let mut loc_y = negative_y_voxel_count;
+        let mut loc_z = negative_z_voxel_count;
 
         let file_size = std::fs::metadata(filename).unwrap().len();
         while f.seek(SeekFrom::Current(0))? < file_size {
             let header = f.read_u8()?;
 
-            if header == 3 { // Start Of A Voxel With Objects
-                previous_voxel_was_non_empty = true;
+            if (header == 3 || header == 1) && voxels.len() > 0 {
+                assert!(loc_x <= positive_x_voxel_count);
+                loc_z += 1;
 
+                if loc_z > positive_z_voxel_count {
+                    loc_z = negative_z_voxel_count;
+
+                    loc_y += 1;
+                    
+                    if loc_y > positive_y_voxel_count {
+                        loc_y = negative_y_voxel_count;
+
+                        loc_x += 1;
+                    }
+                }
+            }
+
+            if header == 3 { // Start Of A Voxel With Objects
                 let subheader = f.read_u8()?;
                 assert_eq!(subheader, 10);
 
                 let mut voxel = Voxel {
+                    position: Vector3 { x: loc_x, y: loc_y, z: loc_z },
                     complex_objects: vec![],
                     small_objects: vec![],
+                    missing: false,
                 };
 
                 let big_objects_count = f.read_u8()?;
@@ -230,17 +529,18 @@ impl SetupFile {
                     assert_eq!(list_type, 9);
 
                     for _ in 0..small_objects_count {
-                        let object_id = f.read_u16::<BigEndian>()?;
+                        let object = f.read_u16::<BigEndian>()?;
 
-                        if SPRITES_ID.contains(&object_id) {
+                        if SPRITES_ID.contains(&object) {
                             let size = f.read_u16::<BigEndian>()?;
                             let x = f.read_u16::<BigEndian>()?;
                             let y = f.read_u16::<BigEndian>()?;
                             let z = f.read_u16::<BigEndian>()?;
-                            let unk = f.read_u16::<BigEndian>()?;
+                            let unk1 = f.read_u8()?;
+                            let unk2 = f.read_u8()?;
 
-                            voxel.small_objects.push(SmallObject::Sprite(object_id, size, x, y, z, unk));
-                        } else if STATICS_ID.contains(&object_id) {
+                            voxel.small_objects.push(SmallObject::Sprite { object, size, x, y, z, unk1, unk2 });
+                        } else if STATICS_ID.contains(&object) {
                             let y_rot = f.read_u8()?;
                             let xz_rot = f.read_u8()?;
                             let x = f.read_u16::<BigEndian>()?;
@@ -249,14 +549,30 @@ impl SetupFile {
                             let size = f.read_u8()?;
                             let unk = f.read_u8()?;
 
-                            voxel.small_objects.push(SmallObject::Static(object_id, y_rot, xz_rot, x, y, z, size, unk));
+                            voxel.small_objects.push(SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk });
                         } else {
-                            panic!("unknown small object");
+                            let unk1 = f.read_u8()?;
+                            let unk2 = f.read_u8()?;
+                            let unk3 = f.read_u8()?;
+                            let unk4 = f.read_u8()?;
+                            let unk5 = f.read_u8()?;
+                            let unk6 = f.read_u8()?;
+                            let unk7 = f.read_u8()?;
+                            let unk8 = f.read_u8()?;
+                            let unk9 = f.read_u8()?;
+                            let unk10 = f.read_u8()?;
+
+                            voxel.small_objects.push(SmallObject::Unknown {
+                                object, unk1, unk2, unk3, unk4, unk5,
+                                unk6, unk7, unk8, unk9, unk10 });
                         }
                     }
                 }
 
                 voxels.push(voxel);
+
+                let voxels_separator = f.read_u8()?;
+                assert_eq!(voxels_separator, 1);
             } else if header == 0 {
                 let subheader = f.read_u8()?;
                 assert_eq!(subheader, 3);
@@ -269,6 +585,9 @@ impl SetupFile {
                     let camera_type = f.read_u8()?;
 
                     let camera = match camera_type {
+                        0 => {
+                            Camera::Type0 { id }
+                        },
                         1 | 3 => {
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 1);
@@ -314,38 +633,51 @@ impl SetupFile {
                         4 => {
                             let section_id = f.read_u8()?;
                             assert_eq!(section_id, 1);
-                            let one = f.read_u32::<BigEndian>()?;
-                            assert_eq!(one, 1);
+                            let unk = f.read_u32::<BigEndian>()?;
 
-                            Camera::Type4 { id }
+                            Camera::Type4 { id, unk }
                         },
                         _ => panic!("camera_type: {:?}", camera_type)
                     };
 
                     cameras.push(camera);
 
-                    let section_id = f.read_u8()?;
-                    assert_eq!(section_id, 0);
+                    if camera_type != 0 {
+                        let end_of_camera = f.read_u8()?;
+                        assert_eq!(end_of_camera, 0);
+                    }
 
                     start_of_camera = f.read_u8()?;
                 }
                 assert_eq!(start_of_camera, 0); // end of list
             } else if header == 4 {
-                let mut start_of_lighting = f.read_u8()?;
-                //while start_of_lighting == 1 {
-                //    panic!("unhandled lighting");
-                //}
-                start_of_lighting = f.read_u8()?;
-                assert_eq!(start_of_lighting, 0);
-            } else if header == 1 {
-                if previous_voxel_was_non_empty {
-                    previous_voxel_was_non_empty = false;
-                } else {
-                    voxels.push(Voxel {
-                        complex_objects: vec![],
-                        small_objects: vec![],
-                    });
+                let mut first_section_id = f.read_u8()?;
+                while first_section_id == 1 {
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 2);
+                    let position = read_3_floats(&mut f);
+
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 3);
+                    let unk = read_2_floats(&mut f);
+
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 4);
+                    let colours = read_3_u32(&mut f);
+
+                    lightings.push(Lighting { position, unk, colours });
+
+                    first_section_id = f.read_u8()?;
                 }
+                first_section_id = f.read_u8()?;
+                assert_eq!(first_section_id, 0);
+            } else if header == 1 {
+                voxels.push(Voxel {
+                    position: Vector3 { x: loc_x, y: loc_y, z: loc_z },
+                    complex_objects: vec![],
+                    small_objects: vec![],
+                    missing: true,
+                });
             } else {
                 panic!("> header = 0x{:X}", header);
             }
@@ -354,18 +686,70 @@ impl SetupFile {
         Ok(SetupFile {
             cameras,
             voxels,
+            lightings,
         })
     }
 
     pub fn read_yaml(filename: &str) -> SetupFile {
-        SetupFile {
-            cameras: vec![],
-            voxels: vec![],
-        }
+        let f = File::open(filename).expect("Could not open file.");
+        let setup_file: SetupFile = serde_yaml::from_reader(f).expect("Could not read values.");
+        setup_file
     }
 
-    pub fn write_bin(&self, filename: &str) {
+    pub fn write_bin(&self, filename: &str) -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(filename).unwrap();
 
+        let mut neg_x = 0;
+        let mut neg_y = 0;
+        let mut neg_z = 0;
+        let mut pos_x = 0;
+        let mut pos_y = 0;
+        let mut pos_z = 0;
+
+        for voxel in &self.voxels {
+            neg_x = if voxel.position.x < neg_x { voxel.position.x } else { neg_x };
+            neg_y = if voxel.position.y < neg_y { voxel.position.y } else { neg_y };
+            neg_z = if voxel.position.z < neg_z { voxel.position.z } else { neg_z };
+            pos_x = if voxel.position.x > pos_x { voxel.position.x } else { pos_x };
+            pos_y = if voxel.position.y > pos_y { voxel.position.y } else { pos_y };
+            pos_z = if voxel.position.z > pos_z { voxel.position.z } else { pos_z };
+        }
+
+        f.write_u16::<BigEndian>(0x0101)?;
+        f.write_i32::<BigEndian>(neg_x)?;
+        f.write_i32::<BigEndian>(neg_y)?;
+        f.write_i32::<BigEndian>(neg_z)?;
+        f.write_i32::<BigEndian>(pos_x)?;
+        f.write_i32::<BigEndian>(pos_y)?;
+        f.write_i32::<BigEndian>(pos_z)?;
+
+        for voxel in &self.voxels {
+            write_voxel(&mut f, voxel)?;
+            f.write_u8(1)?;
+        }
+        f.write_u8(0)?;
+
+        f.write_u8(3)?;
+        for cam in &self.cameras {
+            f.write_u8(1)?;
+            write_camera(&mut f, cam)?;
+        }
+        f.write_u8(0)?;
+
+        f.write_u8(4)?;
+        for lighting in &self.lightings {
+            f.write_u8(1)?;
+            f.write_u8(2)?;
+            write_3_floats(&mut f, &lighting.position);
+            f.write_u8(2)?;
+            write_2_floats(&mut f, &lighting.unk);
+            f.write_u8(2)?;
+            write_3_u32(&mut f, &lighting.colours);
+        }
+        f.write_u8(0)?;
+        f.write_u8(0)?;
+
+        Ok(())
     }
 
     pub fn write_yaml(&self, filename: &str) {
