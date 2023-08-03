@@ -691,8 +691,8 @@ impl SetupFile {
     }
 
     pub fn read_yaml(filename: &str) -> SetupFile {
-        let f = File::open(filename).expect("Could not open file.");
-        let setup_file: SetupFile = serde_yaml::from_reader(f).expect("Could not read values.");
+        let f = File::open(filename).expect(&format!("Can't open {}", filename));
+        let setup_file: SetupFile = serde_yaml::from_reader(f).expect(&format!("{} is not a valid YAML SetupFile.", filename));
         setup_file
     }
 
@@ -741,9 +741,9 @@ impl SetupFile {
             f.write_u8(1)?;
             f.write_u8(2)?;
             write_3_floats(&mut f, &lighting.position);
-            f.write_u8(2)?;
+            f.write_u8(3)?;
             write_2_floats(&mut f, &lighting.unk);
-            f.write_u8(2)?;
+            f.write_u8(4)?;
             write_3_u32(&mut f, &lighting.colours);
         }
         f.write_u8(0)?;
