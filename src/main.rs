@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
 use byteorder::{ReadBytesExt, BigEndian};
-use clap::Parser;
+use clap::{ Parser, ValueEnum };
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
 use std::fs::File;
@@ -29,6 +29,28 @@ use level::Level;
 struct Args {
     /// File to read
     filename: String,
+
+    /// Input format 
+    #[arg(short, long)]
+    input: Option<InputFormat>,
+
+    /// Output format 
+    #[arg(short, long)]
+    output: Option<OutputFormat>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum OutputFormat {
+    Yaml,
+    Obj,
+    Bin,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum InputFormat {
+    Level,
+    Setup,
+    Yaml,
 }
 
 fn main() {
@@ -38,22 +60,67 @@ fn main() {
     let output = output.file_stem().unwrap();
     let output = output.to_str().unwrap();
 
-    if filename.ends_with(".lvl_setup.bin") {
-        let output = format!("{}.yaml", output);
-        match SetupFile::read_bin(filename) {
-            Ok(file) => file.write_yaml(&output),
-            Err(e) => panic!("{:?}", e)
-        };
-    } else if filename.ends_with(".yaml") {
-        let output = format!("{}_repack.bin", output);
-        SetupFile::read_yaml(filename).write_bin(&output).unwrap();
+    let input = if let Some(input) = args.input {
+        input
+    } else if filename.ends_with(".lvl_setup.bin") {
+        InputFormat::Setup
     } else if filename.ends_with(".lvl.bin") {
-        let output = format!("{}.yaml", output);
-        match Level::read_bin(filename) {
-            Ok(file) => file.write_yaml(&output),
-            Err(e) => panic!("{:?}", e)
-        };
+        InputFormat::Level
+    } else if filename.ends_with(".yaml") {
+        InputFormat::Yaml
     } else {
-        panic!("Filename must ends with '.lvl_setup.bin', '.lvl.bin' or '.yaml'. Got '{}'.", filename);
-    }
+        panic!("Can't detect the format. Rename the file to .lvl.bin/.lvl_setup.bin or use the --input argument.");
+    };
+
+    match input {
+        InputFormat::Setup => {
+            if let Some(format) = args.output {
+                if format != OutputFormat::Yaml {
+                    panic!("level setup files can only be converted to YAML.");
+                }
+            }
+
+            let output = format!("{}.yaml", output);
+            match SetupFile::read_bin(filename) {
+                Ok(file) => file.write_yaml(&output),
+                Err(e) => panic!("{:?}", e)
+            };
+        },
+        InputFormat::Level => {
+            match Level::read_bin(filename) {
+                Ok(file) => {
+                    let format = if let Some(format) = args.output { format } else { OutputFormat::Obj };
+                    match format {
+                        OutputFormat::Yaml => {
+                            let output = format!("{}.yaml", output);
+                            println!("LVL YAML");
+                        },
+                        OutputFormat::Obj => { println!("LVL OBJ"); },
+                        OutputFormat::Bin => panic!("Why would you want to convert .bin to .bin?"),
+                    };
+                },
+                Err(e) => panic!("{:?}", e),
+            };
+        },
+        InputFormat::Yaml => {
+            if let Some(setupfile) = SetupFile::read_yaml(filename) {
+                let output = format!("{}_repack.bin", output);
+                setupfile.write_bin(&output).unwrap();
+            } else if let Some(level) = Level::read_yaml(filename) {
+                let format = if let Some(format) = args.output { format } else { OutputFormat::Bin };
+                match format {
+                    OutputFormat::Bin => {
+                        let output = format!("{}_repack.bin", output);
+                        level.write_bin(&output).unwrap();
+                    },
+                    OutputFormat::Obj => {
+                        level.write_obj(&output).unwrap();
+                    },
+                    OutputFormat::Yaml => panic!("Why would you want to convert YAML to YAML?"),
+                };
+            } else {
+                panic!("{} is not a valid YAML file.", filename);
+            }
+        },
+    };
 }

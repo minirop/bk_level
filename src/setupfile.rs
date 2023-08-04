@@ -690,10 +690,13 @@ impl SetupFile {
         })
     }
 
-    pub fn read_yaml(filename: &str) -> SetupFile {
+    pub fn read_yaml(filename: &str) -> Option<SetupFile> {
         let f = File::open(filename).expect(&format!("Can't open {}", filename));
-        let setup_file: SetupFile = serde_yaml::from_reader(f).expect(&format!("{} is not a valid YAML SetupFile.", filename));
-        setup_file
+        let ret: Result<SetupFile, serde_yaml::Error> = serde_yaml::from_reader(f);
+        match ret {
+            Ok(file) => Some(file),
+            Err(_) => None,
+        }
     }
 
     pub fn write_bin(&self, filename: &str) -> std::io::Result<()> {

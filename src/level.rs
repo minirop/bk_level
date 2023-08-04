@@ -481,7 +481,18 @@ impl Level {
         Ok(Level {})
     }
 
-    pub fn write_yaml(&self, filename: &str) {
+    pub fn read_yaml(filename: &str) -> Option<Level> {
+        Some(Level {})
+    }
 
+    pub fn write_bin(&self, filename: &str) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    pub fn write_yaml(&self, filename: &str) {
+    }
+
+    pub fn write_obj(&self, filename: &str) -> std::io::Result<()> {
+        Ok(())
     }
 }
