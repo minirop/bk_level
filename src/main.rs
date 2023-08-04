@@ -20,10 +20,10 @@ use std::io::Write;
 mod setupfile;
 use setupfile::SetupFile;
 
-mod level;
-use level::Level;
+mod model;
+use model::Model;
 
-/// Convert levels and level setup files
+/// Convert models and level setup files
 #[derive(Parser, Debug)]
 #[command(author = None, version = None, about = None, long_about = None)]
 struct Args {
@@ -48,7 +48,7 @@ enum OutputFormat {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum InputFormat {
-    Level,
+    Model,
     Setup,
     Yaml,
 }
@@ -56,20 +56,20 @@ enum InputFormat {
 fn main() {
     let args = Args::parse();
     let filename = &args.filename;
-    let output = Path::new(&args.filename);
-    let output = output.file_stem().unwrap();
-    let output = output.to_str().unwrap();
+    let output_name = Path::new(&args.filename);
+    let output_name = output_name.file_stem().unwrap();
+    let output_name = output_name.to_str().unwrap();
 
     let input = if let Some(input) = args.input {
         input
     } else if filename.ends_with(".lvl_setup.bin") {
         InputFormat::Setup
-    } else if filename.ends_with(".lvl.bin") {
-        InputFormat::Level
+    } else if filename.ends_with(".model.bin") {
+        InputFormat::Model
     } else if filename.ends_with(".yaml") {
         InputFormat::Yaml
     } else {
-        panic!("Can't detect the format. Rename the file to .lvl.bin/.lvl_setup.bin or use the --input argument.");
+        panic!("Can't detect the format. Rename the file to .model.bin/.lvl_setup.bin or use the --input argument.");
     };
 
     match input {
@@ -80,22 +80,24 @@ fn main() {
                 }
             }
 
-            let output = format!("{}.yaml", output);
+            let output_name = format!("{}.yaml", output_name);
             match SetupFile::read_bin(filename) {
-                Ok(file) => file.write_yaml(&output),
+                Ok(file) => file.write_yaml(&output_name),
                 Err(e) => panic!("{:?}", e)
             };
         },
-        InputFormat::Level => {
-            match Level::read_bin(filename) {
+        InputFormat::Model => {
+            match Model::read_bin(filename) {
                 Ok(file) => {
-                    let format = if let Some(format) = args.output { format } else { OutputFormat::Obj };
+                    let format = if let Some(format) = args.output { format } else { OutputFormat::Yaml };
                     match format {
                         OutputFormat::Yaml => {
-                            let output = format!("{}.yaml", output);
-                            println!("LVL YAML");
+                            let output_name = format!("{}.yaml", output_name);
+                            file.write_yaml(&output_name);
                         },
-                        OutputFormat::Obj => { println!("LVL OBJ"); },
+                        OutputFormat::Obj => {
+                            Model::read_bin_obj(output_name).unwrap();
+                        },
                         OutputFormat::Bin => panic!("Why would you want to convert .bin to .bin?"),
                     };
                 },
@@ -104,17 +106,17 @@ fn main() {
         },
         InputFormat::Yaml => {
             if let Some(setupfile) = SetupFile::read_yaml(filename) {
-                let output = format!("{}_repack.bin", output);
-                setupfile.write_bin(&output).unwrap();
-            } else if let Some(level) = Level::read_yaml(filename) {
+                let output_name = format!("{}_repack.bin", output_name);
+                setupfile.write_bin(&output_name).unwrap();
+            } else if let Some(model) = Model::read_yaml(filename) {
                 let format = if let Some(format) = args.output { format } else { OutputFormat::Bin };
                 match format {
                     OutputFormat::Bin => {
-                        let output = format!("{}_repack.bin", output);
-                        level.write_bin(&output).unwrap();
+                        let output_name = format!("{}_repack.bin", output_name);
+                        model.write_bin(&output_name).unwrap();
                     },
                     OutputFormat::Obj => {
-                        level.write_obj(&output).unwrap();
+                        model.write_obj(&output_name).unwrap();
                     },
                     OutputFormat::Yaml => panic!("Why would you want to convert YAML to YAML?"),
                 };
