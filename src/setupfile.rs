@@ -4,6 +4,12 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 
+use crate::types::read_3_u32;
+use crate::types::write_3_u32;
+use crate::types::read_2_floats;
+use crate::types::read_3_floats;
+use crate::types::write_3_floats;
+use crate::types::write_2_floats;
 use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
@@ -85,43 +91,6 @@ pub struct Lighting {
     position: Vector3<f32>,
     unk: Vector2<f32>,
     colours: Vector3<u32>,
-}
-
-fn read_2_floats(f: &mut File) -> Vector2<f32> {
-    let x = f.read_f32::<BigEndian>().unwrap();
-    let y = f.read_f32::<BigEndian>().unwrap();
-    Vector2 { x, y }
-}
-
-fn read_3_floats(f: &mut File) -> Vector3<f32> {
-    let x = f.read_f32::<BigEndian>().unwrap();
-    let y = f.read_f32::<BigEndian>().unwrap();
-    let z = f.read_f32::<BigEndian>().unwrap();
-    Vector3 { x, y, z }
-}
-
-fn read_3_u32(f: &mut File) -> Vector3<u32> {
-    let x = f.read_u32::<BigEndian>().unwrap();
-    let y = f.read_u32::<BigEndian>().unwrap();
-    let z = f.read_u32::<BigEndian>().unwrap();
-    Vector3 { x, y, z }
-}
-
-fn write_2_floats(f: &mut File, vec: &Vector2<f32>) {
-    f.write_f32::<BigEndian>(vec.x).unwrap();
-    f.write_f32::<BigEndian>(vec.y).unwrap();
-}
-
-fn write_3_floats(f: &mut File, vec: &Vector3<f32>) {
-    f.write_f32::<BigEndian>(vec.x).unwrap();
-    f.write_f32::<BigEndian>(vec.y).unwrap();
-    f.write_f32::<BigEndian>(vec.z).unwrap();
-}
-
-fn write_3_u32(f: &mut File, vec: &Vector3<u32>) {
-    f.write_u32::<BigEndian>(vec.x).unwrap();
-    f.write_u32::<BigEndian>(vec.y).unwrap();
-    f.write_u32::<BigEndian>(vec.z).unwrap();
 }
 
 fn write_voxel(f: &mut File, voxel: &Voxel) -> std::io::Result<()> {

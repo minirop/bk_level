@@ -4,6 +4,8 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 
+use crate::types::read_3_u8;
+use crate::types::read_3_i16;
 use crate::types::{ Vector2, Vector3 };
 use std::collections::HashSet;
 use image::RgbaImage;
@@ -25,7 +27,7 @@ pub struct Model {
     vertices: Vec<Vertex>,
     collisions: Collisions,
     geometry: Vec<Geometry>,
-    unk14: u32,
+    unk14: ModelUnk14,
     unk20: Unknown20,
     unk28: u32,
     mesh_list: Vec<Mesh>,
@@ -141,6 +143,46 @@ impl Collisions {
     }
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelUnk14_0 {
+    unk1: Vector3<i16>,
+    unk2: Vector3<i16>,
+    unk3: Vector3<i16>,
+    unk4: Vector3<u8>,
+    unk5: u8,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelUnk14_1 {
+    unk1: u16,
+    unk2: u16,
+    unk3: Vector3<i16>,
+    unk4: Vector3<u8>,
+    unk5: u8,
+    unk6: u8,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelUnk14_2 {
+    unk1: u16,
+    unk2: Vector3<i16>,
+    unk3: u8,
+    unk4: u8,
+}
+
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelUnk14 {
+    unk14_0: Vec<ModelUnk14_0>,
+    unk14_1: Vec<ModelUnk14_1>,
+    unk14_2: Vec<ModelUnk14_2>,
+}
+
+impl ModelUnk14 {
+    fn new() -> Self {
+        Default::default()
+    }
+}
+
 struct Command {
     id: u8,
     b1: u8,
@@ -200,6 +242,7 @@ pub enum F3dex {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
+    Unknown0x00 { len: u32 },
     Sort { x1: f32, y1: f32, z1: f32, x2: f32, y2: f32, z2: f32,
         draw_only_nearest: bool, offset1: u16, offset2: u16, len: u32 },
     Bone { address: u16, len: u8, id: u8, unk: u16 },
@@ -618,16 +661,24 @@ impl Model {
         let geometry_type = f.read_u16::<BigEndian>()?;
         let display_list_setup_offset = f.read_u32::<BigEndian>()?;
         let vertex_store_setup_offset = f.read_u32::<BigEndian>()?;
-
-        let unk14 = f.read_u32::<BigEndian>()?;
-        println!("unk14: {:#X}", unk14); // TODO
-
+        let unk14_offset = f.read_u32::<BigEndian>()?;
         let animation_setup = f.read_u32::<BigEndian>()?;
         let collision_setup = f.read_u32::<BigEndian>()?;
         let unk20 = f.read_u32::<BigEndian>()?;
         let effects_setup = f.read_u32::<BigEndian>()?;
         let unk28 = f.read_u32::<BigEndian>()?;
         let animated_textures_offset = f.read_u32::<BigEndian>()?;
+
+        println!("animation_setup {:#X}", animation_setup);
+        println!("collision_setup {:#X}", collision_setup);
+        println!("unk20 {:#X}", unk20);
+        println!("effects_setup {:#X}", effects_setup);
+        println!("unk28 {:#X}", unk28);
+        println!("animated_textures_offset {:#X}", animated_textures_offset);
+        println!("geometry_offset {:#X}", geometry_offset);
+        println!("unk14_offset {:#X}", unk14_offset);
+        println!("vertex_store_setup_offset {:#X}", vertex_store_setup_offset);
+        println!("display_list_setup_offset {:#X}", display_list_setup_offset);
         
         let unk = f.read_u16::<BigEndian>()?;
         println!("unk (vertices_count): {}", unk);
@@ -983,6 +1034,52 @@ impl Model {
             unimplemented!();
         }
 
+        let mut unk14 = ModelUnk14::new();
+
+        if unk14_offset > 0 {
+            assert_eq!(unk14_offset as u64, f.seek(SeekFrom::Current(0))?);
+
+            let unk14_0_count = f.read_u16::<BigEndian>()?;
+            let unk14_1_count = f.read_u16::<BigEndian>()?;
+            let unk14_2_count = f.read_u16::<BigEndian>()?;
+            let unk14_3 = f.read_u16::<BigEndian>()?;
+
+            for _ in 0..unk14_0_count {
+                let unk1 = read_3_i16(&mut f);
+                let unk2 = read_3_i16(&mut f);
+                let unk3 = read_3_i16(&mut f);
+                let unk4 = read_3_u8(&mut f);
+                let unk5 = f.read_u8()?;
+                let padding = f.read_u8()?; assert_eq!(padding, 0);
+
+                unk14.unk14_0.push(ModelUnk14_0 {
+                    unk1, unk2, unk3, unk4, unk5
+                });
+            }
+
+            for _ in 0..unk14_1_count {
+                let unk1 = f.read_u16::<BigEndian>()?;
+                let unk2 = f.read_u16::<BigEndian>()?;
+                let unk3 = read_3_i16(&mut f);
+                let unk4 = read_3_u8(&mut f);
+                let unk5 = f.read_u8()?;
+                let unk6 = f.read_u8()?;
+                let padding = f.read_u8()?; assert_eq!(padding, 0);
+
+                unk14.unk14_1.push(ModelUnk14_1 {
+                    unk1, unk2, unk3, unk4, unk5, unk6
+                });
+            }
+
+            for _ in 0..unk14_2_count {
+                let unk1 = f.read_u16::<BigEndian>()?;
+                let unk2 = read_3_i16(&mut f);
+                let unk3 = f.read_u8()?;
+                let unk4 = f.read_u8()?;
+                let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            }
+        }
+
         let mut collisions = Collisions::new();
         if collision_setup > 0 {
             assert_eq!(collision_setup as u64, f.seek(SeekFrom::Current(0))?);
@@ -1133,6 +1230,14 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
     //println!("geocode 0x{:X} at 0x{:X}", geocode, offset);
 
     let geocmd = match geocode {
+        0x0 => {
+            let len = f.read_u32::<BigEndian>()?;
+            for _ in 0..((len - 8)/4) {
+                f.read_u32::<BigEndian>()?;
+            }
+
+            Geometry::Unknown0x00 { len }
+        },
         0x1 => {
             let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
             let offset1 = f.read_u16::<BigEndian>()?;
@@ -1272,7 +1377,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let unk2 = f.read_u32::<BigEndian>()?;
 
             Geometry::Unknown0x10 { len, unk1, unk2 }
-        }
+        },
         _ => panic!("Unknown geometry command 0x{:X} at offset 0x{:X}", geocode, f.seek(SeekFrom::Current(0))?),
     };
 
