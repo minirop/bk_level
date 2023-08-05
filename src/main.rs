@@ -96,7 +96,7 @@ fn main() {
                             file.write_yaml(&output_name);
                         },
                         OutputFormat::Obj => {
-                            Model::read_bin_obj(output_name).unwrap();
+                            Model::read_bin_obj(filename).unwrap();
                         },
                         OutputFormat::Bin => panic!("Why would you want to convert .bin to .bin?"),
                     };

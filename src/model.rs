@@ -17,20 +17,57 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 
-
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
-    pub commands: Vec<F3dex>,
-    pub faces: Vec<Face>,
-    pub unk: Vec<u16>,
+    textures: Vec<Texture>,
+    commands: Vec<F3dex>,
+    vertices: Vec<Vertex>,
+    collisions: Collisions,
+    geometry: Vec<Geometry>,
+    unk14: u32,
+    unk20: Unknown20,
+    unk28: u32,
+    mesh_list: Vec<Mesh>,
+    geometry_type: u16,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Vertex {
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Unknown20 {
+    unk0: u8,
+    unk1: u8,
+    unk2: i16,
+    unk3: i16,
+    unk4: i16,
+    unk5: i16,
+    unk6: i16,
+    unk7: i16,
+    unk8: u8,
+    unk9: u8,
+}
+
+impl Unknown20 {
+    fn new() -> Self {
+        Self {
+            unk0: 0, unk1: 0,
+            unk2: 0, unk3: 0, unk4: 0,
+            unk5: 0, unk6: 0, unk7: 0,
+            unk8: 0, unk9: 0,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Mesh {
+    id: u16,
+    vertices: Vec<u16>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Vertex {
     x: i16,
     y: i16,
     z: i16,
-    unk: i16,
+    flag: u16,
     u: i16,
     v: i16,
     r: f32,
@@ -43,65 +80,93 @@ impl Vertex {
     fn new() -> Self {
         Self {
             x: 0, y: 0, z: 0,
-            unk: 0, u: 0, v: 0,
+            flag: 0, u: 0, v: 0,
             r: 0.0, g: 0.0, b: 0.0, a: 0.0,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Face {
-    x: i16,
-    y: i16,
-    z: i16,
-    u: i16,
-    v: i16,
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
-}
-
-impl Face {
-    fn new() -> Self {
-        Self {
-            x: 0, y: 0, z: 0,
-            u: 0, v: 0,
-            r: 0.0, g: 0.0, b: 0.0, a: 0.0,
-        }
-    }
-}
-
-struct Texture {
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Texture {
     offset: u32,
-    unknown: u32,
+    format: TextureFormat,
+    unknown: u16,
     width: u8,
     height: u8,
-    padding1: u16,
-    padding2: u32,
+    #[serde(skip_serializing)]
     hratio: f32,
+    #[serde(skip_serializing)]
     wratio: f32,
-    palette: [u8; 32]
+    palette: Option<Vec<u8>>,
 }
 
 impl Texture {
-    fn new() -> Texture {
-        Texture {
+    fn new() -> Self {
+        Self {
             offset: 0,
+            format: TextureFormat::C4,
             unknown: 0,
             width: 0,
             height: 0,
-            padding1: 0,
-            padding2: 0,
             hratio: 1.0,
             wratio: 1.0,
-            palette: [0; 32],
+            palette: None,
         }
     }
 
     fn set_ratio(&mut self, sscale: f32, tscale: f32) {
         self.wratio = sscale / ((self.width as f32) * 32.0);
         self.hratio = tscale / ((self.height as f32) * 32.0);
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct GeoColl {
+    start_tri_index: u16,
+    tri_count: u16,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct TriColl {
+    vtx_indx_1: u16,
+    vtx_indx_2: u16,
+    vtx_indx_3: u16,
+    unk: u16,
+    flags: u32,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Collisions {
+    min_x: i16,
+    min_y: i16,
+    min_z: i16,
+    max_x: i16,
+    max_y: i16,
+    max_z: i16,
+    y_stride: i16,
+    z_stride: i16,
+    scale: u16,
+    geo: Vec<GeoColl>,
+    tri: Vec<TriColl>,
+    unknown: u32,
+}
+
+impl Collisions {
+    fn new() -> Self {
+        Self {
+            min_x: 0,
+            min_y: 0,
+            min_z: 0,
+            max_x: 0,
+            max_y: 0,
+            max_z: 0,
+            y_stride: 0,
+            z_stride: 0,
+            scale: 0,
+            geo: vec![],
+            tri: vec![],
+            unknown: 0,
+        }
     }
 }
 
@@ -118,12 +183,21 @@ struct Command {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum TextureFormat {
+pub enum ColourFormat {
     Rgba,
     Yuv,
     Palette,
     GrayscaleAlpha,
     Grayscale,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum TextureFormat {
+    C4,
+    C8,
+    Rgba16,
+    Rgba32,
+    IA8,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -135,24 +209,41 @@ pub enum F3dex {
     ClearGeometryMode(u32),
     SetGeometryMode(u32),
     EndDisplayList,
+    SetOtherModeL { amount: u8, count: u8, mode: u32 }, // to improve
     SetOtherModeH { amount: u8, count: u8, mode: u32 }, // to improve
     Texture { mipmaps: u8, descriptor: u8, enable: bool, scalex: f32, scaley: f32 },
+    PopMatrix { unk1: u8, unk2: u8, unk3: u8, count: u32 },
     Triangle1 { v1: u8, v2: u8, v3: u8 },
     RdpLoadSync,
     RdpPipeSync,
     LoadTlut { descriptor: u8 },
     SetTileSize { upper_left_s: u16, upper_left_t: u16, descriptor: u8, width: u16, height: u16 },
     LoadBlock { upper_left_s: u16, upper_left_t: u16, descriptor: u8, texels_count: u16, dxt: u16 },
-    SetTile { format: TextureFormat, depth: u8, values_per_row: u16,
+    SetTile { format: ColourFormat, depth: u8, values_per_row: u16,
         tmem_offset: u16, descriptor: u8, palette: u8,
         clamp_mirror_y: u8, unwrapped_y: u8, perspective_div_y: u8,
         clamp_mirror_x: u8, unwrapped_x: u8, perspective_div_x: u8 },
     SetCombine {},
-    SettImg { format: TextureFormat, depth: u8, address: u32 },
+    SettImg { format: ColourFormat, depth: u8, address: u32 },
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum Geometry {
+    Sort { x1: f32, y1: f32, z1: f32, x2: f32, y2: f32, z2: f32,
+        draw_only_nearest: bool, offset1: u16, offset2: u16, len: u32 },
+    Bone { address: u16, len: u8, id: u8, unk: u16 },
+    LoadDisplayList { len: u32, offset: u16, tri_count: u16 },
+    Skinning,
+    Lod { layout_offset: u32, max_dist: f32, min_dist: f32, test_x: f32, test_y: f32, test_z: f32 },
+    ReferencePoint { index: u16, bone: u16, x: f32, y: f32, z: f32 },
+    Selector { selector: u16, indices: Vec<i32> },
+    DrawDistance { len: u16, min_x: i16, min_y: i16, min_z: i16, max_x: i16, max_y: i16, max_z: i16, unk1: u32, unk2: u16 },
+    Group0x0f { header: Vec<u32>, commands: Vec<Geometry> },
+    Unknown0x10 { len: u32, unk1: u32, unk2: u32 },
 }
 
 impl Model {
-    pub fn read_bin_obj(filename: &str) -> std::io::Result<Self> {
+    pub fn read_bin_obj(filename: &str) -> std::io::Result<()> {
         let file_size = std::fs::metadata(filename).unwrap().len();
         let mut f = File::open(filename)?;
         let header = f.read_u32::<BigEndian>()?;
@@ -190,7 +281,7 @@ impl Model {
             vert.x = f.read_i16::<BigEndian>()?;
             vert.y = f.read_i16::<BigEndian>()?;
             vert.z = f.read_i16::<BigEndian>()?;
-            vert.unk = f.read_i16::<BigEndian>()?;
+            vert.flag = f.read_u16::<BigEndian>()?;
             vert.u = f.read_i16::<BigEndian>()?;
             vert.v = f.read_i16::<BigEndian>()?;
             vert.r = (f.read_u8()? as f32) / 256.0;
@@ -209,11 +300,11 @@ impl Model {
             let mut tex = Texture::new();
 
             tex.offset = f.read_u32::<BigEndian>()?;
-            tex.unknown = f.read_u32::<BigEndian>()?;
+            let unknown = f.read_u32::<BigEndian>()?;
             tex.width = f.read_u8()?;
             tex.height = f.read_u8()?;
-            tex.padding1 = f.read_u16::<BigEndian>()?;
-            tex.padding2 = f.read_u32::<BigEndian>()?;
+            let unknown = f.read_u16::<BigEndian>()?;
+            let unknown = f.read_u32::<BigEndian>()?;
 
             textures.push(tex);
         }
@@ -346,7 +437,7 @@ impl Model {
 
                                     let mut index1 = 0;
                                     let mut index7 = 0;
-                                    let palette = &texture.palette;
+                                    let Some(palette) = &texture.palette else { todo!() };
 
                                     for _ in 0..texture.height {
                                         for _ in 0..(texture.width/2) {
@@ -439,12 +530,12 @@ impl Model {
                     let index6 = (command.b6 / 2) as usize;
                     let index7 = (command.b7 / 2) as usize;
 
-                    let v1 = vertices[ cache[ index1 ] as usize ];
-                    let v2 = vertices[ cache[ index2 ] as usize ];
-                    let v3 = vertices[ cache[ index3 ] as usize ];
-                    let v5 = vertices[ cache[ index5 ] as usize ];
-                    let v6 = vertices[ cache[ index6 ] as usize ];
-                    let v7 = vertices[ cache[ index7 ] as usize ];
+                    let v1 = &vertices[ cache[ index1 ] as usize ];
+                    let v2 = &vertices[ cache[ index2 ] as usize ];
+                    let v3 = &vertices[ cache[ index3 ] as usize ];
+                    let v5 = &vertices[ cache[ index5 ] as usize ];
+                    let v6 = &vertices[ cache[ index6 ] as usize ];
+                    let v7 = &vertices[ cache[ index7 ] as usize ];
                     let tex = &textures[current_texture];
 
                     writeln!(output, "vt {} {}", (v1.u as f32) * tex.wratio, (v1.v as f32) * tex.hratio * -1.0)?;
@@ -475,9 +566,9 @@ impl Model {
                     let index6 = (command.b6 / 2) as usize;
                     let index7 = (command.b7 / 2) as usize;
 
-                    let v5 = vertices[ cache[ index5 ] as usize ];
-                    let v6 = vertices[ cache[ index6 ] as usize ];
-                    let v7 = vertices[ cache[ index7 ] as usize ];
+                    let v5 = &vertices[ cache[ index5 ] as usize ];
+                    let v6 = &vertices[ cache[ index6 ] as usize ];
+                    let v7 = &vertices[ cache[ index7 ] as usize ];
                     let tex = &textures[current_texture];
 
                     writeln!(output, "vt {} {}", (v5.u as f32) * tex.wratio, (v5.v as f32) * tex.hratio * -1.0)?;
@@ -491,14 +582,16 @@ impl Model {
                 231 => { /* G_RDPPIPESYNC */ },
                 240 => {
                     let pal_size = ((command.value & 0xFFF000) >> 14) * 2 + 2;
-                    assert_eq!(pal_size, 32); // don't handle other sizes
+                    //assert_eq!(pal_size, 32); // don't handle other sizes
 
                     let mut cur_tex = &mut textures[current_texture];
+                    let mut palette = vec![];
                     for index1 in 0..pal_size {
                         let texture_offset = cur_tex.offset + 64 + index1;
                         f.seek(SeekFrom::Start((texture_offset + tex_count as u32 * 16) as u64))?;
-                        cur_tex.palette[index1 as usize] = f.read_u8()?;
+                        palette.push(f.read_u8()?);
                     }
+                    cur_tex.palette = Some(palette);
 
                     if commands[index1 + 4].id == 186 {
                         new_texture = true;
@@ -527,11 +620,12 @@ impl Model {
                         }
                     }
 
-                    if current_texture == 0xFFFFFFFF {
-                        panic!("ERROR");
+                    if current_texture != 0xFFFFFFFF {
+                        textures[current_texture].set_ratio(sscale, tscale);
+                    } else {
+                        println!("TEXTURE NOT FOUND!!!");
+                        current_texture = 0;
                     }
-
-                    textures[current_texture].set_ratio(sscale, tscale);
 
                     new_texture = true;
                     texture_is_null = false;
@@ -540,11 +634,7 @@ impl Model {
             };
         }
 
-        Ok(Self {
-            commands: vec![],
-            faces: vec![],
-            unk: vec![],
-        })
+        Ok(())
     }
 
     pub fn read_bin(filename: &str) -> std::io::Result<Self> {
@@ -558,32 +648,23 @@ impl Model {
         let display_list_setup_offset = f.read_u32::<BigEndian>()?;
         let vertex_store_setup_offset = f.read_u32::<BigEndian>()?;
 
-        let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+        let unk14 = f.read_u32::<BigEndian>()?;
+        println!("unk14: {:#X}", unk14); // TODO
 
         let animation_setup = f.read_u32::<BigEndian>()?;
         let collision_setup = f.read_u32::<BigEndian>()?;
-        let effects_setup_end_address = f.read_u32::<BigEndian>()?;
+        let unk20 = f.read_u32::<BigEndian>()?;
         let effects_setup = f.read_u32::<BigEndian>()?;
-
-        let unk = f.read_u32::<BigEndian>()?;
-        println!("unk (after effects): {}", unk);
-
+        let unk28 = f.read_u32::<BigEndian>()?;
         let animated_textures_offset = f.read_u32::<BigEndian>()?;
         
         let unk = f.read_u16::<BigEndian>()?;
-        println!("unk (faces_count): {}", unk);
-        let faces_count = f.read_u16::<BigEndian>()?;
+        println!("unk (vertices_count): {}", unk);
+        let vertices_count = f.read_u16::<BigEndian>()?;
         
-        let vert_count = f.read_u16::<BigEndian>()?;
-        let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+        let unk2 = f.read_f32::<BigEndian>()?; // scale?
 
-        println!("geometry_offset 0x{:X}", geometry_offset);
-        println!("texture_setup_offset 0x{:X}", texture_setup_offset);
-        println!("display_list_setup_offset 0x{:X}", display_list_setup_offset);
-        println!("vertex_store_setup_offset 0x{:X}", vertex_store_setup_offset);
-        println!("effects_setup 0x{:X}", effects_setup);
-        println!("effects_setup_end_address 0x{:X}", effects_setup_end_address);
-        println!("animated_textures_offset 0x{:X}", animated_textures_offset);
+        println!("{} {} {}", unk, vertices_count, unk2);
 
         // TEXTURES
         assert!(texture_setup_offset != 0);
@@ -592,17 +673,55 @@ impl Model {
         let bytes_count = f.read_u32::<BigEndian>()?;
         let textures_count = f.read_u16::<BigEndian>()?;
         let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-        let texture_start_offset = f.read_u32::<BigEndian>()?; assert_eq!(texture_start_offset, 0);
 
-        // TODO: handle more than 1 texture
-        let texture_type = f.read_u16::<BigEndian>()?;
-        let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-        let width = f.read_u8()?;
-        let height = f.read_u8()?;
-        let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-        let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+        let mut textures: Vec<Texture> = vec![];
+        for _ in 0..textures_count {
+            let mut tex = Texture::new();
 
-        f.seek(SeekFrom::Current((bytes_count - 0x18) as i64))?;
+            tex.offset = f.read_u32::<BigEndian>()?;
+            let format = f.read_u16::<BigEndian>()?;
+            tex.format = match format {
+                1 => TextureFormat::C4,
+                2 => TextureFormat::C8,
+                4 => TextureFormat::Rgba16,
+                8 => TextureFormat::Rgba32,
+                16 => TextureFormat::IA8,
+                _ => panic!("Unknown texture format {}.", format),
+            };
+            tex.unknown = f.read_u16::<BigEndian>()?;
+            tex.width = f.read_u8()?;
+            tex.height = f.read_u8()?;
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+
+            textures.push(tex);
+        }
+
+        let start = f.seek(SeekFrom::Current(0))? as u32;
+        for texture in &textures {
+            assert_eq!(texture.offset + start, f.seek(SeekFrom::Current(0))? as u32);
+
+            match texture.format {
+                TextureFormat::C4 => {
+                    let size = (texture.width as i64) * (texture.height as i64) / 2 + 32;
+                    f.seek(SeekFrom::Current(size))?;
+                },
+                TextureFormat::C8 => {
+                    let size = (texture.width as i64) * (texture.height as i64) + 512;
+                    f.seek(SeekFrom::Current(size))?;
+                },
+                TextureFormat::Rgba16 => {
+                    let count = if texture.unknown == 0 { 3 } else { 2 };
+                    let size = (texture.width as i64) * (texture.height as i64) * count;
+                    f.seek(SeekFrom::Current(size))?;
+                },
+                TextureFormat::Rgba32 => {
+                    let size = (texture.width as i64) * (texture.height as i64) * 4;
+                    f.seek(SeekFrom::Current(size))?;
+                },
+                _ => panic!("Unhandled texture format {:?}", texture.format),
+            };
+        }
 
         // DISPLAY LIST
         assert!(display_list_setup_offset != 0);
@@ -610,13 +729,14 @@ impl Model {
 
         let commands_count = f.read_u32::<BigEndian>()?;
         let unk = f.read_u32::<BigEndian>()?;
-        println!("unk (commands count): {:?}", unk);
+        println!("unk (commands count): 0x{:X}", unk);
 
         let mut commands = vec![];
 
         let mut debug_prev_pos = f.seek(SeekFrom::Current(0))? - 8;
 
         for _ in 0..commands_count {
+            // check I read 8 bytes each time
             assert_eq!(debug_prev_pos + 8, f.seek(SeekFrom::Current(0))?);
             debug_prev_pos = f.seek(SeekFrom::Current(0))?;
 
@@ -682,6 +802,15 @@ impl Model {
 
                     F3dex::EndDisplayList
                 },
+                0xB9 => {
+                    let padding = f.read_u8()?; assert_eq!(padding, 0);
+                    let amount = f.read_u8()?;
+                    let count = f.read_u8()?;
+                    let mode = f.read_u32::<BigEndian>()?;
+
+                    // TODO
+                    F3dex::SetOtherModeL { amount, count, mode }
+                },
                 0xBA => {
                     let padding = f.read_u8()?; assert_eq!(padding, 0);
                     let amount = f.read_u8()?;
@@ -704,6 +833,14 @@ impl Model {
                     let scaley = (frac_y as f32) / (0xFFFF as f32);
 
                     F3dex::Texture { mipmaps, descriptor, enable, scalex, scaley }
+                },
+                0xBD => {
+                    let unk1 = f.read_u8()?;
+                    let unk2 = f.read_u8()?;
+                    let unk3 = f.read_u8()?;
+                    let count = f.read_u32::<BigEndian>()?;
+
+                    F3dex::PopMatrix { unk1, unk2, unk3, count }
                 },
                 0xBF => {
                     let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
@@ -775,11 +912,11 @@ impl Model {
                     let b7 = f.read_u8()?;
 
                     let format = match b1 >> 5 {
-                        0 => TextureFormat::Rgba,
-                        1 => TextureFormat::Yuv,
-                        2 => TextureFormat::Palette,
-                        3 => TextureFormat::GrayscaleAlpha,
-                        4 => TextureFormat::Grayscale,
+                        0 => ColourFormat::Rgba,
+                        1 => ColourFormat::Yuv,
+                        2 => ColourFormat::Palette,
+                        3 => ColourFormat::GrayscaleAlpha,
+                        4 => ColourFormat::Grayscale,
                         _ => panic!("Unknown texture format."),
                     };
                     let depth = 4 * 2u8.pow(((b1 >> 3) & 0b11) as u32);
@@ -812,11 +949,11 @@ impl Model {
                     let address = f.read_u32::<BigEndian>()?;
 
                     let format = match flags >> 5 {
-                        0 => TextureFormat::Rgba,
-                        1 => TextureFormat::Yuv,
-                        2 => TextureFormat::Palette,
-                        3 => TextureFormat::GrayscaleAlpha,
-                        4 => TextureFormat::Grayscale,
+                        0 => ColourFormat::Rgba,
+                        1 => ColourFormat::Yuv,
+                        2 => ColourFormat::Palette,
+                        3 => ColourFormat::GrayscaleAlpha,
+                        4 => ColourFormat::Grayscale,
                         _ => panic!("Unknown texture format."),
                     };
 
@@ -847,49 +984,136 @@ impl Model {
         let coll_range1 = f.read_i16::<BigEndian>()?;
         let coll_range2 = f.read_i16::<BigEndian>()?;
 
-        let faces_count_2 = f.read_u16::<BigEndian>()?;
-        assert_eq!(faces_count, faces_count_2);
+        let vertices_count_2 = f.read_u16::<BigEndian>()?;
+        assert_eq!(vertices_count, vertices_count_2);
 
         let unk = f.read_u16::<BigEndian>()?;
 
-        println!("offset: 0x{:X}", f.seek(SeekFrom::Current(0))?);
-        println!("coord_range1: {}", coord_range1);
-        println!("coord_range2: {}", coord_range2);
-        println!("coll_range1: {}", coll_range1);
-        println!("coll_range2: {}", coll_range2);
-        println!("faces_count_2: {}", faces_count_2);
-        println!("unk: {}", unk);
+        let mut vertices: Vec<Vertex> = vec![];
+        for _ in 0..vertices_count {
+            let mut vertex = Vertex::new();
 
-        let mut faces: Vec<Face> = vec![];
-        for _ in 0..faces_count {
-            let mut face = Face::new();
-
-            face.x = f.read_i16::<BigEndian>()?;
-            face.y = f.read_i16::<BigEndian>()?;
-            face.z = f.read_i16::<BigEndian>()?;
+            vertex.x = f.read_i16::<BigEndian>()?;
+            vertex.y = f.read_i16::<BigEndian>()?;
+            vertex.z = f.read_i16::<BigEndian>()?;
             let padding = f.read_u16::<BigEndian>()?;
             assert_eq!(padding, 0);
-            face.u = f.read_i16::<BigEndian>()?;
-            face.v = f.read_i16::<BigEndian>()?;
-            face.r = (f.read_u8()? as f32) / 256.0;
-            face.g = (f.read_u8()? as f32) / 256.0;
-            face.b = (f.read_u8()? as f32) / 256.0;
-            face.a = (f.read_u8()? as f32) / 256.0;
+            vertex.u = f.read_i16::<BigEndian>()?;
+            vertex.v = f.read_i16::<BigEndian>()?;
+            vertex.r = (f.read_u8()? as f32) / 256.0;
+            vertex.g = (f.read_u8()? as f32) / 256.0;
+            vertex.b = (f.read_u8()? as f32) / 256.0;
+            vertex.a = (f.read_u8()? as f32) / 256.0;
 
-            faces.push(face);
+            vertices.push(vertex);
         }
 
-        println!("offset: 0x{:X}", f.seek(SeekFrom::Current(0))?);
-        let mut unk = vec![];
-        let remaining = (geometry_offset - (f.seek(SeekFrom::Current(0))? as u32)) / 2;
-        for _ in 0..remaining {
-            unk.push(f.read_u16::<BigEndian>()?);
+        if animation_setup > 0 {
+            unimplemented!();
         }
+
+        let mut collisions = Collisions::new();
+        if collision_setup > 0 {
+            assert_eq!(collision_setup as u64, f.seek(SeekFrom::Current(0))?);
+
+            collisions.min_x = f.read_i16::<BigEndian>()?;
+            collisions.min_y = f.read_i16::<BigEndian>()?;
+            collisions.min_z = f.read_i16::<BigEndian>()?;
+            collisions.max_x = f.read_i16::<BigEndian>()?;
+            collisions.max_y = f.read_i16::<BigEndian>()?;
+            collisions.max_z = f.read_i16::<BigEndian>()?;
+            collisions.y_stride = f.read_i16::<BigEndian>()?;
+            collisions.z_stride = f.read_i16::<BigEndian>()?;
+            let geo_count = f.read_i16::<BigEndian>()?;
+            collisions.scale = f.read_u16::<BigEndian>()?;
+            let tri_count = f.read_i16::<BigEndian>()?;
+            let padding = f.read_i16::<BigEndian>()?; assert_eq!(padding, 0);
+
+            for _ in 0..geo_count {
+                let start_tri_index = f.read_u16::<BigEndian>()?;
+                let tri_count = f.read_u16::<BigEndian>()?;
+
+                collisions.geo.push(GeoColl {
+                    start_tri_index,
+                    tri_count,
+                });
+            }
+
+            for _ in 0..tri_count {
+                let vtx_indx_1 = f.read_u16::<BigEndian>()?;
+                let vtx_indx_2 = f.read_u16::<BigEndian>()?;
+                let vtx_indx_3 = f.read_u16::<BigEndian>()?;
+                let unk = f.read_u16::<BigEndian>()?;
+                let flags = f.read_u32::<BigEndian>()?;
+
+                collisions.tri.push(TriColl {
+                    vtx_indx_1,
+                    vtx_indx_2,
+                    vtx_indx_3,
+                    unk,
+                    flags,
+                });
+            }
+
+            collisions.unknown = f.read_u32::<BigEndian>()?;
+        }
+
+        let mut mesh_list = vec![];
+
+        if effects_setup > 0 {
+            assert_eq!(effects_setup as u64, f.seek(SeekFrom::Current(0))?);
+
+            let mesh_count = f.read_u16::<BigEndian>()?;
+
+            for _ in 0..mesh_count {
+                let id = f.read_u16::<BigEndian>()?;
+                let vtx_count = f.read_u16::<BigEndian>()?;
+
+                let mut vertices = vec![];
+                for _ in 0..vtx_count {
+                    let vtx = f.read_u16::<BigEndian>()?;
+                    vertices.push(vtx);
+                }
+
+                mesh_list.push(Mesh {
+                    id,
+                    vertices,
+                })
+            }
+
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+        }
+
+        let mut unknown20 = Unknown20::new();
+        if unk20 > 0 {
+            assert_eq!(unk20 as u64, f.seek(SeekFrom::Current(0))?);
+
+            unknown20.unk0 = f.read_u8()?; // count of "unk2 to unk9"?
+            unknown20.unk1 = f.read_u8()?;
+            unknown20.unk2 = f.read_i16::<BigEndian>()?;
+            unknown20.unk3 = f.read_i16::<BigEndian>()?;
+            unknown20.unk4 = f.read_i16::<BigEndian>()?;
+            unknown20.unk5 = f.read_i16::<BigEndian>()?;
+            unknown20.unk6 = f.read_i16::<BigEndian>()?;
+            unknown20.unk7 = f.read_i16::<BigEndian>()?;
+            unknown20.unk8 = f.read_u8()?;
+            unknown20.unk9 = f.read_u8()?;
+        }
+
+        assert_eq!(geometry_offset as u64, f.seek(SeekFrom::Current(0))?);
+        let geometry = read_geometry_layout(&mut f)?;
 
         Ok(Self {
+            textures,
             commands,
-            faces,
-            unk,
+            vertices,
+            collisions,
+            geometry,
+            unk14,
+            unk20: unknown20,
+            unk28,
+            mesh_list,
+            geometry_type,
         })
     }
 
@@ -910,4 +1134,170 @@ impl Model {
     pub fn write_obj(&self, filename: &str) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
+    let file_size = f.metadata().unwrap().len();
+    let offset = f.seek(SeekFrom::Current(0))?;
+    let geocode = f.read_u32::<BigEndian>()?;
+    //println!("geocode 0x{:X} at 0x{:X}", geocode, offset);
+
+    let geocmd = match geocode {
+        0x1 => {
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let offset1 = f.read_u16::<BigEndian>()?;
+            let x1 = f.read_f32::<BigEndian>()?;
+            let y1 = f.read_f32::<BigEndian>()?;
+            let z1 = f.read_f32::<BigEndian>()?;
+            let x2 = f.read_f32::<BigEndian>()?;
+            let y2 = f.read_f32::<BigEndian>()?;
+            let z2 = f.read_f32::<BigEndian>()?;
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let draw_only_nearest = f.read_u8()? > 0;
+            let offset2 = f.read_u16::<BigEndian>()?;
+            let len = f.read_u32::<BigEndian>()?;
+
+            Geometry::Sort { x1, y1, z1, x2, y2, z2, draw_only_nearest, offset1, offset2, len }
+        },
+        0x2 => {
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let address = f.read_u16::<BigEndian>()?;
+            let len = f.read_u8()?;
+            let id = f.read_u8()?;
+            let unk = f.read_u16::<BigEndian>()?;
+
+            if len == 0x10 {
+                let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            } else if len != 0 {
+                panic!("invalid cmd 2 size!");
+            }
+
+            Geometry::Bone { address, len, id, unk }
+        },
+        0x3 => {
+            let len = f.read_u32::<BigEndian>()?;
+            let offset = f.read_u16::<BigEndian>()?;
+            let tri_count = f.read_u16::<BigEndian>()?;
+
+            // only the last one doesn't have "padding"
+            if f.seek(SeekFrom::Current(0))? < file_size {
+                let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            }
+
+            Geometry::LoadDisplayList { len, offset, tri_count }
+        },
+        0x5 => {
+            let len = f.read_u32::<BigEndian>()?;
+
+            for _ in 0..6 {
+                f.read_u16::<BigEndian>()?;
+            }
+
+            // only the last one doesn't have "padding?"
+            if f.seek(SeekFrom::Current(0))? < file_size {
+                f.read_u16::<BigEndian>()?;
+                f.read_u16::<BigEndian>()?;
+            }
+
+            Geometry::Skinning
+        },
+        0x8 => {
+            let layout_offset = f.read_u32::<BigEndian>()?;
+            let max_dist = f.read_f32::<BigEndian>()?;
+            let min_dist = f.read_f32::<BigEndian>()?;
+            let test_x = f.read_f32::<BigEndian>()?;
+            let test_y = f.read_f32::<BigEndian>()?;
+            let test_z = f.read_f32::<BigEndian>()?;
+            let len = f.read_u32::<BigEndian>()?; assert_eq!(len, 0x20);
+
+            Geometry::Lod { layout_offset, max_dist, min_dist, test_x, test_y, test_z }
+        },
+        0xA => {
+            let len = f.read_u32::<BigEndian>()?;
+            let index = f.read_u16::<BigEndian>()?;
+            let bone = f.read_u16::<BigEndian>()?;
+            let x = f.read_f32::<BigEndian>()?;
+            let y = f.read_f32::<BigEndian>()?;
+            let z = f.read_f32::<BigEndian>()?;
+
+            Geometry::ReferencePoint { index, bone, x, y, z }
+        },
+        0xC => {
+            let len = f.read_u32::<BigEndian>()?;
+            let child_count = f.read_u16::<BigEndian>()?;
+            let selector = f.read_u16::<BigEndian>()?;
+
+            let mut indices = vec![];
+
+            for _ in 0..child_count {
+                let index = f.read_i32::<BigEndian>()?;
+                indices.push(index);
+            }
+
+            Geometry::Selector { selector, indices }
+        },
+        0xD => {
+            let unk1 = f.read_u32::<BigEndian>()?;
+            let min_x = f.read_i16::<BigEndian>()?;
+            let min_y = f.read_i16::<BigEndian>()?;
+            let min_z = f.read_i16::<BigEndian>()?;
+            let max_x = f.read_i16::<BigEndian>()?;
+            let max_y = f.read_i16::<BigEndian>()?;
+            let max_z = f.read_i16::<BigEndian>()?;
+            let len = f.read_u16::<BigEndian>()?;
+            let unk2 = f.read_u16::<BigEndian>()?;
+
+            Geometry::DrawDistance { len, min_x, min_y, min_z, max_x, max_y, max_z, unk1, unk2 }
+        },
+        0xF => {
+            let len = f.read_u32::<BigEndian>()? as u64;
+
+            let mut header = vec![];
+            let mut unk = f.read_u32::<BigEndian>()?;
+            while unk != 0xD {
+                header.push(unk);
+                unk = f.read_u32::<BigEndian>()?;
+            }
+            f.seek(SeekFrom::Current(-4))?;
+
+            let mut commands = vec![];
+
+            if len > 0 {
+                while f.seek(SeekFrom::Current(0))? < offset + len  {
+                    let geocmd = read_geometry_layout_command(f)?;
+                    commands.push(geocmd);
+                }
+            } else {
+                while f.seek(SeekFrom::Current(0))? < file_size {
+                    let geocmd = read_geometry_layout_command(f)?;
+                    commands.push(geocmd);
+                }
+            }
+
+            Geometry::Group0x0f { header, commands }
+        },
+        0x10 => {
+            let len = f.read_u32::<BigEndian>()?; assert_eq!(len, 0x10);
+            let unk1 = f.read_u32::<BigEndian>()?;
+            let unk2 = f.read_u32::<BigEndian>()?;
+
+            Geometry::Unknown0x10 { len, unk1, unk2 }
+        }
+        _ => panic!("Unknown geometry command 0x{:X} at offset 0x{:X}", geocode, f.seek(SeekFrom::Current(0))?),
+    };
+
+    Ok(geocmd)
+}
+
+fn read_geometry_layout(f: &mut File) -> std::io::Result<Vec<Geometry>> {
+    let file_size = f.metadata().unwrap().len();
+
+    let mut geometry = vec![];
+    while f.seek(SeekFrom::Current(0))? < file_size {
+        let geocmd = read_geometry_layout_command(f)?;
+
+        geometry.push(geocmd);
+    }
+
+    Ok(geometry)
 }
