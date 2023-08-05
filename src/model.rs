@@ -4,6 +4,7 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 
+use crate::types::{ Vector2, Vector3 };
 use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
@@ -31,7 +32,7 @@ pub struct Model {
     geometry_type: u16,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown20 {
     unk0: u8,
     unk1: u8,
@@ -47,12 +48,7 @@ pub struct Unknown20 {
 
 impl Unknown20 {
     fn new() -> Self {
-        Self {
-            unk0: 0, unk1: 0,
-            unk2: 0, unk3: 0, unk4: 0,
-            unk5: 0, unk6: 0, unk7: 0,
-            unk8: 0, unk9: 0,
-        }
+        Default::default()
     }
 }
 
@@ -62,14 +58,11 @@ pub struct Mesh {
     vertices: Vec<u16>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vertex {
-    x: i16,
-    y: i16,
-    z: i16,
+    position: Vector3<i16>,
     flag: u16,
-    u: i16,
-    v: i16,
+    uv: Vector2<i16>,
     r: f32,
     g: f32,
     b: f32,
@@ -78,11 +71,7 @@ pub struct Vertex {
 
 impl Vertex {
     fn new() -> Self {
-        Self {
-            x: 0, y: 0, z: 0,
-            flag: 0, u: 0, v: 0,
-            r: 0.0, g: 0.0, b: 0.0, a: 0.0,
-        }
+        Default::default()
     }
 }
 
@@ -135,38 +124,20 @@ pub struct TriColl {
     flags: u32,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collisions {
-    min_x: i16,
-    min_y: i16,
-    min_z: i16,
-    max_x: i16,
-    max_y: i16,
-    max_z: i16,
-    y_stride: i16,
-    z_stride: i16,
+    min: Vector3<i16>,
+    max: Vector3<i16>,
+    stride: Vector2<i16>,
     scale: u16,
     geo: Vec<GeoColl>,
     tri: Vec<TriColl>,
-    unknown: u32,
+    unknown: Option<u32>,
 }
 
 impl Collisions {
     fn new() -> Self {
-        Self {
-            min_x: 0,
-            min_y: 0,
-            min_z: 0,
-            max_x: 0,
-            max_y: 0,
-            max_z: 0,
-            y_stride: 0,
-            z_stride: 0,
-            scale: 0,
-            geo: vec![],
-            tri: vec![],
-            unknown: 0,
-        }
+        Default::default()
     }
 }
 
@@ -278,12 +249,12 @@ impl Model {
         for _ in 0..vt_count {
             let mut vert = Vertex::new();
 
-            vert.x = f.read_i16::<BigEndian>()?;
-            vert.y = f.read_i16::<BigEndian>()?;
-            vert.z = f.read_i16::<BigEndian>()?;
+            vert.position.x = f.read_i16::<BigEndian>()?;
+            vert.position.y = f.read_i16::<BigEndian>()?;
+            vert.position.z = f.read_i16::<BigEndian>()?;
             vert.flag = f.read_u16::<BigEndian>()?;
-            vert.u = f.read_i16::<BigEndian>()?;
-            vert.v = f.read_i16::<BigEndian>()?;
+            vert.uv.x = f.read_i16::<BigEndian>()?;
+            vert.uv.y = f.read_i16::<BigEndian>()?;
             vert.r = (f.read_u8()? as f32) / 256.0;
             vert.g = (f.read_u8()? as f32) / 256.0;
             vert.b = (f.read_u8()? as f32) / 256.0;
@@ -361,7 +332,7 @@ impl Model {
         writeln!(output, "mtllib output.mtl")?;
 
         for v in &vertices {
-            writeln!(output, "v {} {} {}", v.x, v.y, v.z)?;
+            writeln!(output, "v {} {} {}", v.position.x, v.position.y, v.position.z)?;
         }
 
         let mut new_texture = false;
@@ -538,15 +509,15 @@ impl Model {
                     let v7 = &vertices[ cache[ index7 ] as usize ];
                     let tex = &textures[current_texture];
 
-                    writeln!(output, "vt {} {}", (v1.u as f32) * tex.wratio, (v1.v as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v2.u as f32) * tex.wratio, (v2.v as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v3.u as f32) * tex.wratio, (v3.v as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v1.uv.x as f32) * tex.wratio, (v1.uv.y as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v2.uv.x as f32) * tex.wratio, (v2.uv.y as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v3.uv.x as f32) * tex.wratio, (v3.uv.y as f32) * tex.hratio * -1.0)?;
                     writeln!(output, "f {}/{} {}/{} {}/{}", cache[index1]+1, vt_index, cache[index2]+1, vt_index+1, cache[index3]+1, vt_index+2)?;
                     vt_index += 3;
 
-                    writeln!(output, "vt {} {}", (v5.u as f32) * tex.wratio, (v5.v as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v6.u as f32) * tex.wratio, (v6.v as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v7.u as f32) * tex.wratio, (v7.v as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v5.uv.x as f32) * tex.wratio, (v5.uv.y as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v6.uv.x as f32) * tex.wratio, (v6.uv.y as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v7.uv.x as f32) * tex.wratio, (v7.uv.y as f32) * tex.hratio * -1.0)?;
                     writeln!(output, "f {}/{} {}/{} {}/{}", cache[index5]+1, vt_index, cache[index6]+1, vt_index+1, cache[index7]+1, vt_index+2)?;
                     vt_index += 3;
                 },
@@ -571,9 +542,9 @@ impl Model {
                     let v7 = &vertices[ cache[ index7 ] as usize ];
                     let tex = &textures[current_texture];
 
-                    writeln!(output, "vt {} {}", (v5.u as f32) * tex.wratio, (v5.v as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v6.u as f32) * tex.wratio, (v6.v as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v7.u as f32) * tex.wratio, (v7.v as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v5.uv.x as f32) * tex.wratio, (v5.uv.y as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v6.uv.x as f32) * tex.wratio, (v6.uv.y as f32) * tex.hratio * -1.0)?;
+                    writeln!(output, "vt {} {}", (v7.uv.x as f32) * tex.wratio, (v7.uv.y as f32) * tex.hratio * -1.0)?;
 
                     writeln!(output, "f {}/{} {}/{} {}/{}", cache[index5]+1, vt_index, cache[index6]+1, vt_index+1, cache[index7]+1, vt_index+2)?;
                     vt_index += 3;
@@ -993,13 +964,13 @@ impl Model {
         for _ in 0..vertices_count {
             let mut vertex = Vertex::new();
 
-            vertex.x = f.read_i16::<BigEndian>()?;
-            vertex.y = f.read_i16::<BigEndian>()?;
-            vertex.z = f.read_i16::<BigEndian>()?;
+            vertex.position.x = f.read_i16::<BigEndian>()?;
+            vertex.position.y = f.read_i16::<BigEndian>()?;
+            vertex.position.z = f.read_i16::<BigEndian>()?;
             let padding = f.read_u16::<BigEndian>()?;
             assert_eq!(padding, 0);
-            vertex.u = f.read_i16::<BigEndian>()?;
-            vertex.v = f.read_i16::<BigEndian>()?;
+            vertex.uv.x = f.read_i16::<BigEndian>()?;
+            vertex.uv.y = f.read_i16::<BigEndian>()?;
             vertex.r = (f.read_u8()? as f32) / 256.0;
             vertex.g = (f.read_u8()? as f32) / 256.0;
             vertex.b = (f.read_u8()? as f32) / 256.0;
@@ -1016,14 +987,21 @@ impl Model {
         if collision_setup > 0 {
             assert_eq!(collision_setup as u64, f.seek(SeekFrom::Current(0))?);
 
-            collisions.min_x = f.read_i16::<BigEndian>()?;
-            collisions.min_y = f.read_i16::<BigEndian>()?;
-            collisions.min_z = f.read_i16::<BigEndian>()?;
-            collisions.max_x = f.read_i16::<BigEndian>()?;
-            collisions.max_y = f.read_i16::<BigEndian>()?;
-            collisions.max_z = f.read_i16::<BigEndian>()?;
-            collisions.y_stride = f.read_i16::<BigEndian>()?;
-            collisions.z_stride = f.read_i16::<BigEndian>()?;
+            let min_x = f.read_i16::<BigEndian>()?;
+            let min_y = f.read_i16::<BigEndian>()?;
+            let min_z = f.read_i16::<BigEndian>()?;
+            let max_x = f.read_i16::<BigEndian>()?;
+            let max_y = f.read_i16::<BigEndian>()?;
+            let max_z = f.read_i16::<BigEndian>()?;
+
+            collisions.min = Vector3 { x: min_x, y: min_y, z: min_z };
+            collisions.max = Vector3 { x: max_x, y: max_y, z: max_z };
+
+            let y_stride = f.read_i16::<BigEndian>()?;
+            let z_stride = f.read_i16::<BigEndian>()?;
+
+            collisions.stride = Vector2 { x: y_stride, y: z_stride };
+
             let geo_count = f.read_i16::<BigEndian>()?;
             collisions.scale = f.read_u16::<BigEndian>()?;
             let tri_count = f.read_i16::<BigEndian>()?;
@@ -1055,11 +1033,23 @@ impl Model {
                 });
             }
 
-            collisions.unknown = f.read_u32::<BigEndian>()?;
+            let next = if effects_setup > 0 {
+                effects_setup
+            } else if unk20 > 0 {
+                unk20
+            } else {
+                geometry_offset
+            };
+
+            // for some reason, all models don't have the same size (unknown why)
+            // 02D2 has one fewer byte than 02D1 here
+            // maybe 8 bytes alignments?
+            if next as u64 == f.seek(SeekFrom::Current(0))? + 4 {
+                collisions.unknown = Some(f.read_u32::<BigEndian>()?);
+            }
         }
 
         let mut mesh_list = vec![];
-
         if effects_setup > 0 {
             assert_eq!(effects_setup as u64, f.seek(SeekFrom::Current(0))?);
 

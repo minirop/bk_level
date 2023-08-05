@@ -17,6 +17,8 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 
+mod types;
+
 mod setupfile;
 use setupfile::SetupFile;
 

@@ -17,6 +17,8 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 
+use crate::types::{ Vector3, Vector2 };
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SetupFile {
     pub cameras: Vec<Camera>,
@@ -25,24 +27,11 @@ pub struct SetupFile {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Vector2 {
-    x: f32,
-    y: f32,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Vector3<T> {
-    x: T,
-    y: T,
-    z: T,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Camera {
     Type0 { id: u16 },
-    Type1 { id: u16, position: Vector3<f32>, speed: Vector2, rot_acc: Vector2, angles: Vector3<f32>, unk: u32 },
+    Type1 { id: u16, position: Vector3<f32>, speed: Vector2<f32>, rot_acc: Vector2<f32>, angles: Vector3<f32>, unk: u32 },
     Type2 { id: u16, position: Vector3<f32>, angles: Vector3<f32> },
-    Type3 { id: u16, position: Vector3<f32>, speed: Vector2, rot_acc: Vector2, angles: Vector3<f32>, unk: u32, distances: Vector2 },
+    Type3 { id: u16, position: Vector3<f32>, speed: Vector2<f32>, rot_acc: Vector2<f32>, angles: Vector3<f32>, unk: u32, distances: Vector2<f32> },
     Type4 { id: u16, unk: u32 },
 }
 
@@ -94,11 +83,11 @@ pub struct Voxel {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Lighting {
     position: Vector3<f32>,
-    unk: Vector2,
+    unk: Vector2<f32>,
     colours: Vector3<u32>,
 }
 
-fn read_2_floats(f: &mut File) -> Vector2 {
+fn read_2_floats(f: &mut File) -> Vector2<f32> {
     let x = f.read_f32::<BigEndian>().unwrap();
     let y = f.read_f32::<BigEndian>().unwrap();
     Vector2 { x, y }
@@ -118,7 +107,7 @@ fn read_3_u32(f: &mut File) -> Vector3<u32> {
     Vector3 { x, y, z }
 }
 
-fn write_2_floats(f: &mut File, vec: &Vector2) {
+fn write_2_floats(f: &mut File, vec: &Vector2<f32>) {
     f.write_f32::<BigEndian>(vec.x).unwrap();
     f.write_f32::<BigEndian>(vec.y).unwrap();
 }
