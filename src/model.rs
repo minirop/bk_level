@@ -4,14 +4,12 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 
-use crate::types::read_3_u8;
-use crate::types::read_3_i16;
-use crate::types::read_3_floats;
+use crate::types::*;
 use crate::types::{ Vector2, Vector3 };
 use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
-use byteorder::{ReadBytesExt, BigEndian};
+use byteorder::{ ReadBytesExt, BigEndian };
 use clap::Parser;
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
@@ -268,6 +266,11 @@ impl Model {
         let header = f.read_u32::<BigEndian>()?;
         assert_eq!(header, 0x0B);
 
+        let output_dir = Path::new(filename);
+        let output_dir = output_dir.file_stem().unwrap();
+        let output_dir = output_dir.to_str().unwrap();
+        std::fs::create_dir_all(output_dir)?;
+
         // HEADER
         let coll_start = f.read_u32::<BigEndian>()? + 24;
         let unk0x08_0x0b = f.read_u32::<BigEndian>()?;
@@ -367,7 +370,7 @@ impl Model {
         // EXEC COMMANDS
         let mut cache = [0u32; 32usize];
 
-        let mut output_mtl = File::create("output.mtl").expect("Unable to create file");
+        let mut output_mtl = File::create(format!("{}/output.mtl", output_dir)).expect("Unable to create file");
         for id in 0..tex_count {
             let mtlname = format!("material_{:04}", id);
             writeln!(output_mtl, "newmtl {}", mtlname)?;
@@ -375,7 +378,7 @@ impl Model {
         }
         writeln!(output_mtl, "newmtl material_null")?;
 
-        let mut output = File::create("output.obj").expect("Unable to create file");
+        let mut output = File::create(format!("{}/output.obj", output_dir)).expect("Unable to create file");
 
         writeln!(output, "mtllib output.mtl")?;
 
@@ -523,7 +526,8 @@ impl Model {
                             }
 
                             if pixels.len() > 0 {
-                                RgbaImage::from_raw(texture.width as u32, texture.height as u32, pixels).unwrap().save(&mtlpath).unwrap();
+                                let mtlfullpath = format!("{}/{}", output_dir, mtlpath);
+                                RgbaImage::from_raw(texture.width as u32, texture.height as u32, pixels).unwrap().save(&mtlfullpath).unwrap();
                                 created_textures.insert(mtlpath);
                             } else {
                                 panic!("pixels are empty!!");
@@ -642,7 +646,7 @@ impl Model {
                     if current_texture != 0xFFFFFFFF {
                         textures[current_texture].set_ratio(sscale, tscale);
                     } else {
-                        println!("TEXTURE NOT FOUND!!!");
+                        //println!("TEXTURE NOT FOUND!!!");
                         current_texture = 0;
                     }
 
@@ -1336,7 +1340,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
     let file_size = f.metadata().unwrap().len();
     let offset = f.seek(SeekFrom::Current(0))?;
     let geocode = f.read_u32::<BigEndian>()?;
-    println!("geocode {:#X} at {:#X}", geocode, offset);
+    //println!("geocode {:#X} at {:#X}", geocode, offset);
 
     let geocmd = match geocode {
         0x0 => {

@@ -10,7 +10,8 @@
 * Rename them to `<name>.model.bin`
 * Execute the programme with `<name>.model.bin --output obj`
 	* If you don't specify the `--output` format, you'll get a partial YAML file
-* You'll get .obj, .mtl, and .png files
+* You'll get .obj, .mtl, and .png files in a directory named `<name>.model`
+  * You can drag that directory on https://3dviewer.net/ to see it rendered 
 
 ## SETUP FILE:
 
