@@ -250,7 +250,7 @@ pub enum Geometry {
     Skinning,
     Lod { layout_offset: u32, max_dist: f32, min_dist: f32, test_x: f32, test_y: f32, test_z: f32 },
     ReferencePoint { index: u16, bone: u16, x: f32, y: f32, z: f32 },
-    Selector { selector: u16, indices: Vec<i32> },
+    Selector { selector: u16, indices: Vec<i32>, commands: Vec<Geometry> },
     DrawDistance { len: u16, min_x: i16, min_y: i16, min_z: i16, max_x: i16, max_y: i16, max_z: i16, unk1: u32, unk2: u16 },
     Group0x0f { header: Vec<u32>, commands: Vec<Geometry> },
     Unknown0x10 { len: u32, unk1: u32, unk2: u32 },
@@ -669,24 +669,24 @@ impl Model {
         let unk28 = f.read_u32::<BigEndian>()?;
         let animated_textures_offset = f.read_u32::<BigEndian>()?;
 
-        println!("animation_setup {:#X}", animation_setup);
-        println!("collision_setup {:#X}", collision_setup);
+        // order not sure
         println!("unk20 {:#X}", unk20);
-        println!("effects_setup {:#X}", effects_setup);
-        println!("unk28 {:#X}", unk28);
         println!("animated_textures_offset {:#X}", animated_textures_offset);
-        println!("geometry_offset {:#X}", geometry_offset);
         println!("unk14_offset {:#X}", unk14_offset);
-        println!("vertex_store_setup_offset {:#X}", vertex_store_setup_offset);
+
         println!("display_list_setup_offset {:#X}", display_list_setup_offset);
+        println!("vertex_store_setup_offset {:#X}", vertex_store_setup_offset);
+        println!("collision_setup {:#X}", collision_setup);
+        println!("?effects_setup {:#X}", effects_setup);
+        println!("unk28 {:#X}", unk28);
+        println!("animation_setup {:#X}", animation_setup);
+        println!("geometry_offset {:#X}", geometry_offset);
         
         let unk = f.read_u16::<BigEndian>()?;
         println!("unk (vertices_count): {}", unk);
         let vertices_count = f.read_u16::<BigEndian>()?;
         
         let unk2 = f.read_f32::<BigEndian>()?; // scale?
-
-        println!("{} {} {}", unk, vertices_count, unk2);
 
         // TEXTURES
         assert!(texture_setup_offset != 0);
@@ -992,6 +992,7 @@ impl Model {
         // VERTEX STORE
         assert!(vertex_store_setup_offset != 0);
         assert_eq!(vertex_store_setup_offset as u64, f.seek(SeekFrom::Current(0))?);
+        println!("BEGIN vertex_store_setup_offset {:#X}", f.seek(SeekFrom::Current(0))?); 
 
         let neg_x = f.read_i16::<BigEndian>()?;
         let neg_y = f.read_i16::<BigEndian>()?;
@@ -1029,10 +1030,7 @@ impl Model {
 
             vertices.push(vertex);
         }
-
-        if animation_setup > 0 {
-            unimplemented!();
-        }
+        println!("END vertex_store_setup_offset {:#X}", f.seek(SeekFrom::Current(0))?);
 
         let mut unk14 = ModelUnk14::new();
 
@@ -1078,11 +1076,20 @@ impl Model {
                 let unk4 = f.read_u8()?;
                 let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
             }
+
+            // 8 bit alignment?
+            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
+            if alignment < 8 {
+                for _ in 0..alignment {
+                    let padding = f.read_u8()?; assert_eq!(padding, 0);
+                }
+            }
         }
 
         let mut collisions = Collisions::new();
         if collision_setup > 0 {
             assert_eq!(collision_setup as u64, f.seek(SeekFrom::Current(0))?);
+            println!("BEGIN collision_setup {:#X}", f.seek(SeekFrom::Current(0))?);
 
             let min_x = f.read_i16::<BigEndian>()?;
             let min_y = f.read_i16::<BigEndian>()?;
@@ -1130,20 +1137,16 @@ impl Model {
                 });
             }
 
-            let next = if effects_setup > 0 {
-                effects_setup
-            } else if unk20 > 0 {
-                unk20
-            } else {
-                geometry_offset
-            };
-
             // for some reason, all models don't have the same size (unknown why)
             // 02D2 has one fewer byte than 02D1 here
             // maybe 8 bytes alignments?
-            if next as u64 == f.seek(SeekFrom::Current(0))? + 4 {
-                collisions.unknown = Some(f.read_u32::<BigEndian>()?);
+            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
+            if alignment < 8 {
+                for _ in 0..alignment {
+                    let padding = f.read_u8()?; assert_eq!(padding, 0);
+                }
             }
+            println!("END collision_setup {:#X}", f.seek(SeekFrom::Current(0))?);
         }
 
         let mut mesh_list = vec![];
@@ -1165,14 +1168,77 @@ impl Model {
                 mesh_list.push(Mesh {
                     id,
                     vertices,
-                })
+                });
             }
 
+            // maybe 8 bytes alignments?
+            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
+            if alignment < 8 {
+                for _ in 0..alignment {
+                    let padding = f.read_u8()?; assert_eq!(padding, 0);
+                }
+            }
+        }
+
+        if unk28 > 0 {
+            println!("unk28: {:#X} / {:#X}", f.seek(SeekFrom::Current(0))?, unk28);
+            assert_eq!(unk28 as u64, f.seek(SeekFrom::Current(0))?);
+
+            let count = f.read_u16::<BigEndian>()?;
             let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+
+            for _ in 0..count {
+                let coord = read_3_i16(&mut f);
+                let anim_index = f.read_u8()?;
+                let vtx_count = f.read_u8()?;
+                let mut vtx_list = vec![];
+
+                for _ in 0..vtx_count {
+                    let vtx_id = f.read_u16::<BigEndian>()?;
+                    vtx_list.push(vtx_id);
+                }
+            }
+
+            // maybe 8 bytes alignments?
+            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
+            if alignment < 8 {
+                for _ in 0..alignment {
+                    let padding = f.read_u8()?; assert_eq!(padding, 0);
+                }
+            }
+        }
+
+        // before or after unk20?
+        if animation_setup > 0 {
+            println!("animation_setup {:#X} / {:#X}", f.seek(SeekFrom::Current(0))?, animation_setup);
+            assert_eq!(animation_setup as u64, f.seek(SeekFrom::Current(0))?);
+            println!("BEGIN collision_setup {:#X}", f.seek(SeekFrom::Current(0))?);
+
+            let unk1 = f.read_f32::<BigEndian>()?;
+            let count = f.read_u16::<BigEndian>()?;
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            println!("unk1: {}, count: {}", unk1, count);
+
+            for _ in 0..count {
+                let unk11 = f.read_f32::<BigEndian>()?;
+                let unk12 = f.read_f32::<BigEndian>()?;
+                let unk13 = f.read_f32::<BigEndian>()?;
+                let u1 = f.read_i16::<BigEndian>()?;
+                let u2 = f.read_i16::<BigEndian>()?;
+                println!("unk11: {}", unk11);
+                println!("unk12: {}", unk12);
+                println!("unk13: {}", unk13);
+                println!("u1: {}", u1);
+                println!("u2: {}", u2);
+                println!("");
+            }
+
+            println!("END collision_setup {:#X}", f.seek(SeekFrom::Current(0))?);
         }
 
         let mut unknown20 = Unknown20::new();
         if unk20 > 0 {
+            println!("unk20 {:#X} / {:#X}", f.seek(SeekFrom::Current(0))?, unk20);
             assert_eq!(unk20 as u64, f.seek(SeekFrom::Current(0))?);
 
             unknown20.unk0 = f.read_u8()?; // count of "unk2 to unk9"?
@@ -1187,6 +1253,7 @@ impl Model {
             unknown20.unk9 = f.read_u8()?;
         }
 
+        println!("geometry_offset {:#X} / {:#X}", f.seek(SeekFrom::Current(0))?, geometry_offset);
         assert_eq!(geometry_offset as u64, f.seek(SeekFrom::Current(0))?);
         let geometry = read_geometry_layout(&mut f)?;
 
@@ -1329,7 +1396,18 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
                 indices.push(index);
             }
 
-            Geometry::Selector { selector, indices }
+            // maybe 8-bit alignment
+            if child_count % 2 == 0 {
+                let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            }
+
+            let mut commands = vec![];
+            for _ in 0..child_count {
+                let command = read_geometry_layout_command(f)?;
+                commands.push(command);
+            }
+
+            Geometry::Selector { selector, indices, commands }
         },
         0xD => {
             let unk1 = f.read_u32::<BigEndian>()?;
