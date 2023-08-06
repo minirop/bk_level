@@ -4,16 +4,11 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 
-use crate::types::read_3_u32;
-use crate::types::write_3_u32;
-use crate::types::read_2_floats;
-use crate::types::read_3_floats;
-use crate::types::write_3_floats;
-use crate::types::write_2_floats;
+use crate::types::*;
 use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
-use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+use byteorder::{ ReadBytesExt, WriteBytesExt, BigEndian };
 use clap::Parser;
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
@@ -91,6 +86,159 @@ pub struct Lighting {
     position: Vector3<f32>,
     unk: Vector2<f32>,
     colours: Vector3<u32>,
+}
+
+fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
+    let mut complex_objects = vec![];
+    let mut small_objects = vec![];
+    let mut missing = false;
+
+    let mut header = f.read_u8()?;
+    if header == 3 {
+        let subheader = f.read_u8()?;
+        assert_eq!(subheader, 10);
+
+        let big_objects_count = f.read_u8()?;
+
+        let mut list_type = f.read_u8()?;
+        if list_type == 11 { // complex objects list
+            for i in 0..big_objects_count {
+                let x = f.read_u16::<BigEndian>()?;
+                let y = f.read_u16::<BigEndian>()?;
+                let z = f.read_u16::<BigEndian>()?;
+                let script = f.read_u16::<BigEndian>()?;
+                let object = f.read_u16::<BigEndian>()?;
+                let unk_0a = f.read_u8()?;
+                let unk_0b = f.read_u8()?;
+                let unk_0c = f.read_u8()?;
+                let unk_0d = f.read_u8()?;
+                let unk_0e = f.read_u8()?;
+                let unk_0f = f.read_u8()?;
+                let c = f.read_u8()? as u16;
+                let cn = f.read_u16::<BigEndian>()?;
+                let end_indicator = f.read_u8()?;
+
+                let current = (c << 4) + (cn >> 12);
+                let next = cn & 0x0FFF;
+
+                if ACTORS_ID.contains(&object) {
+                    let rotation = (unk_0c as u16) * 2;
+                    let size = ((unk_0e as u16) << 8) + (unk_0f as u16);
+
+                    complex_objects.push(ComplexObject::Actor {
+                        x, y, z,
+                        script, object, unk_0a, unk_0b,
+                        rotation, unk_0d, size,
+                        current, next, end_indicator
+                    });
+                } else if TIMERS_ID.contains(&object) {
+                    let timer = unk_0c;
+
+                    complex_objects.push(ComplexObject::Timed {
+                        x, y, z,
+                        script, object, unk_0a, unk_0b,
+                        timer, unk_0d, unk_0e, unk_0f,
+                        current, next, end_indicator
+                    });
+                } else if SCRIPTS_ID.contains(&object) {
+                    complex_objects.push(ComplexObject::Script {
+                        x, y, z,
+                        script, object, unk_0a, unk_0b,
+                        unk_0c, unk_0d, unk_0e, unk_0f,
+                        current, next, end_indicator
+                    });
+                } else {
+                    let associated = object;
+                    let radius = (script >> 8) * 2;
+                    let object = (script & 0xFF) as u8;
+                    match object {
+                        0x06 | 0x08 | 0x0E | 0x12 | 0x14 | 0x4C | 0x4D | 0x86 | 0x88 | 0x8E | 0x92 | 0x94 => {
+                            complex_objects.push(ComplexObject::Radius {
+                                x, y, z,
+                                radius, object, associated,
+                                unk_0a, unk_0b, unk_0c,
+                                unk_0d, unk_0e, unk_0f,
+                                current, next,
+                                end_indicator
+                            });
+                        },
+                        _ => {
+                            complex_objects.push(ComplexObject::Unknown {
+                                x, y, z,
+                                script, object: associated, unk_0a, unk_0b,
+                                unk_0c, unk_0d, unk_0e, unk_0f, current,
+                                next, end_indicator
+                            });
+                        }
+                    };
+                }
+            }
+
+            list_type = f.read_u8()?;
+        }
+
+        assert_eq!(list_type, 8);
+
+        let small_objects_count = f.read_u8()?;
+
+        if small_objects_count > 0 {
+            let list_type = f.read_u8()?;
+            assert_eq!(list_type, 9);
+
+            for _ in 0..small_objects_count {
+                let object = f.read_u16::<BigEndian>()?;
+
+                if SPRITES_ID.contains(&object) {
+                    let size = f.read_u16::<BigEndian>()?;
+                    let x = f.read_u16::<BigEndian>()?;
+                    let y = f.read_u16::<BigEndian>()?;
+                    let z = f.read_u16::<BigEndian>()?;
+                    let unk1 = f.read_u8()?;
+                    let unk2 = f.read_u8()?;
+
+                    small_objects.push(SmallObject::Sprite { object, size, x, y, z, unk1, unk2 });
+                } else if STATICS_ID.contains(&object) {
+                    let y_rot = f.read_u8()?;
+                    let xz_rot = f.read_u8()?;
+                    let x = f.read_u16::<BigEndian>()?;
+                    let y = f.read_u16::<BigEndian>()?;
+                    let z = f.read_u16::<BigEndian>()?;
+                    let size = f.read_u8()?;
+                    let unk = f.read_u8()?;
+
+                    small_objects.push(SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk });
+                } else {
+                    let unk1 = f.read_u8()?;
+                    let unk2 = f.read_u8()?;
+                    let unk3 = f.read_u8()?;
+                    let unk4 = f.read_u8()?;
+                    let unk5 = f.read_u8()?;
+                    let unk6 = f.read_u8()?;
+                    let unk7 = f.read_u8()?;
+                    let unk8 = f.read_u8()?;
+                    let unk9 = f.read_u8()?;
+                    let unk10 = f.read_u8()?;
+
+                    small_objects.push(SmallObject::Unknown {
+                        object, unk1, unk2, unk3, unk4, unk5,
+                        unk6, unk7, unk8, unk9, unk10 });
+                }
+            }
+        }
+
+        header = f.read_u8()?;
+    } else {
+        missing = true;
+    }
+
+    assert_eq!(header, 1);
+
+    Ok(Voxel {
+        position,
+        complex_objects,
+        small_objects,
+        missing,
+    })
 }
 
 fn write_voxel(f: &mut File, voxel: &Voxel) -> std::io::Result<()> {
@@ -367,279 +515,133 @@ impl SetupFile {
         let mut loc_y = negative_y_voxel_count;
         let mut loc_z = negative_z_voxel_count;
 
-        let file_size = std::fs::metadata(filename).unwrap().len();
-        while f.seek(SeekFrom::Current(0))? < file_size {
-            let header = f.read_u8()?;
+        let voxels_count = x_voxel_count*y_voxel_count*z_voxel_count;
 
-            if (header == 3 || header == 1) && voxels.len() > 0 {
-                assert!(loc_x <= positive_x_voxel_count);
-                loc_z += 1;
+        for _ in 0..voxels_count {
+            let voxel = read_voxel(&mut f, Vector3 {
+                x: loc_x,
+                y: loc_y,
+                z: loc_z,
+            })?;
 
-                if loc_z > positive_z_voxel_count {
-                    loc_z = negative_z_voxel_count;
+            voxels.push(voxel);
 
-                    loc_y += 1;
-                    
-                    if loc_y > positive_y_voxel_count {
-                        loc_y = negative_y_voxel_count;
+            loc_z += 1;
+            if loc_z > positive_z_voxel_count {
+                loc_z = negative_z_voxel_count;
 
-                        loc_x += 1;
-                    }
+                loc_y += 1;
+                if loc_y > positive_y_voxel_count {
+                    loc_y = negative_y_voxel_count;
+
+                    loc_x += 1;
                 }
             }
+        }
 
-            if header == 3 { // Start Of A Voxel With Objects
-                let subheader = f.read_u8()?;
-                assert_eq!(subheader, 10);
+        let padding = f.read_u8()?; assert_eq!(padding, 0);
 
-                let mut voxel = Voxel {
-                    position: Vector3 { x: loc_x, y: loc_y, z: loc_z },
-                    complex_objects: vec![],
-                    small_objects: vec![],
-                    missing: false,
-                };
+        let header = f.read_u8()?;
+        assert_eq!(header, 3);
 
-                let big_objects_count = f.read_u8()?;
+        let mut start_of_camera = f.read_u8()?;
+        while start_of_camera == 1 {
+            let id = f.read_u16::<BigEndian>()?;
+            let camera_two = f.read_u8()?;
+            assert_eq!(camera_two, 2);
+            let camera_type = f.read_u8()?;
 
-                let mut list_type = f.read_u8()?;
-                if list_type == 11 { // complex objects list
-                    for i in 0..big_objects_count {
-                        let x = f.read_u16::<BigEndian>()?;
-                        let y = f.read_u16::<BigEndian>()?;
-                        let z = f.read_u16::<BigEndian>()?;
-                        let script = f.read_u16::<BigEndian>()?;
-                        let object = f.read_u16::<BigEndian>()?;
-                        let unk_0a = f.read_u8()?;
-                        let unk_0b = f.read_u8()?;
-                        let unk_0c = f.read_u8()?;
-                        let unk_0d = f.read_u8()?;
-                        let unk_0e = f.read_u8()?;
-                        let unk_0f = f.read_u8()?;
-                        let c = f.read_u8()? as u16;
-                        let cn = f.read_u16::<BigEndian>()?;
-                        let end_indicator = f.read_u8()?;
-
-                        let current = (c << 4) + (cn >> 12);
-                        let next = cn & 0x0FFF;
-
-                        if ACTORS_ID.contains(&object) {
-                            let rotation = (unk_0c as u16) * 2;
-                            let size = ((unk_0e as u16) << 8) + (unk_0f as u16);
-
-                            voxel.complex_objects.push(ComplexObject::Actor {
-                                x, y, z,
-                                script, object, unk_0a, unk_0b,
-                                rotation, unk_0d, size,
-                                current, next, end_indicator
-                            });
-                        } else if TIMERS_ID.contains(&object) {
-                            let timer = unk_0c;
-
-                            voxel.complex_objects.push(ComplexObject::Timed {
-                                x, y, z,
-                                script, object, unk_0a, unk_0b,
-                                timer, unk_0d, unk_0e, unk_0f,
-                                current, next, end_indicator
-                            });
-                        } else if SCRIPTS_ID.contains(&object) {
-                            voxel.complex_objects.push(ComplexObject::Script {
-                                x, y, z,
-                                script, object, unk_0a, unk_0b,
-                                unk_0c, unk_0d, unk_0e, unk_0f,
-                                current, next, end_indicator
-                            });
-                        } else {
-                            let associated = object;
-                            let radius = (script >> 8) * 2;
-                            let object = (script & 0xFF) as u8;
-                            match object {
-                                0x06 | 0x08 | 0x0E | 0x12 | 0x14 | 0x4C | 0x4D | 0x86 | 0x88 | 0x8E | 0x92 | 0x94 => {
-                                    voxel.complex_objects.push(ComplexObject::Radius {
-                                        x, y, z,
-                                        radius, object, associated,
-                                        unk_0a, unk_0b, unk_0c,
-                                        unk_0d, unk_0e, unk_0f,
-                                        current, next,
-                                        end_indicator
-                                    });
-                                },
-                                _ => {
-                                    voxel.complex_objects.push(ComplexObject::Unknown {
-                                        x, y, z,
-                                        script, object: associated, unk_0a, unk_0b,
-                                        unk_0c, unk_0d, unk_0e, unk_0f, current,
-                                        next, end_indicator
-                                    });
-                                }
-                            };
-                        }
-                    }
-
-                    list_type = f.read_u8()?;
-                }
-
-                assert_eq!(list_type, 8);
-
-                let small_objects_count = f.read_u8()?;
-
-                if small_objects_count > 0 {
-                    let list_type = f.read_u8()?;
-                    assert_eq!(list_type, 9);
-
-                    for _ in 0..small_objects_count {
-                        let object = f.read_u16::<BigEndian>()?;
-
-                        if SPRITES_ID.contains(&object) {
-                            let size = f.read_u16::<BigEndian>()?;
-                            let x = f.read_u16::<BigEndian>()?;
-                            let y = f.read_u16::<BigEndian>()?;
-                            let z = f.read_u16::<BigEndian>()?;
-                            let unk1 = f.read_u8()?;
-                            let unk2 = f.read_u8()?;
-
-                            voxel.small_objects.push(SmallObject::Sprite { object, size, x, y, z, unk1, unk2 });
-                        } else if STATICS_ID.contains(&object) {
-                            let y_rot = f.read_u8()?;
-                            let xz_rot = f.read_u8()?;
-                            let x = f.read_u16::<BigEndian>()?;
-                            let y = f.read_u16::<BigEndian>()?;
-                            let z = f.read_u16::<BigEndian>()?;
-                            let size = f.read_u8()?;
-                            let unk = f.read_u8()?;
-
-                            voxel.small_objects.push(SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk });
-                        } else {
-                            let unk1 = f.read_u8()?;
-                            let unk2 = f.read_u8()?;
-                            let unk3 = f.read_u8()?;
-                            let unk4 = f.read_u8()?;
-                            let unk5 = f.read_u8()?;
-                            let unk6 = f.read_u8()?;
-                            let unk7 = f.read_u8()?;
-                            let unk8 = f.read_u8()?;
-                            let unk9 = f.read_u8()?;
-                            let unk10 = f.read_u8()?;
-
-                            voxel.small_objects.push(SmallObject::Unknown {
-                                object, unk1, unk2, unk3, unk4, unk5,
-                                unk6, unk7, unk8, unk9, unk10 });
-                        }
-                    }
-                }
-
-                voxels.push(voxel);
-
-                let voxels_separator = f.read_u8()?;
-                assert_eq!(voxels_separator, 1);
-            } else if header == 0 {
-                let subheader = f.read_u8()?;
-                assert_eq!(subheader, 3);
-
-                let mut start_of_camera = f.read_u8()?;
-                while start_of_camera == 1 {
-                    let id = f.read_u16::<BigEndian>()?;
-                    let camera_two = f.read_u8()?;
-                    assert_eq!(camera_two, 2);
-                    let camera_type = f.read_u8()?;
-
-                    let camera = match camera_type {
-                        0 => {
-                            Camera::Type0 { id }
-                        },
-                        1 | 3 => {
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 1);
-                            let position = read_3_floats(&mut f);
-
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 2);
-                            let speed = read_2_floats(&mut f);
-                            
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 3);
-                            let rot_acc = read_2_floats(&mut f);
-                            
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 4);
-                            let angles = read_3_floats(&mut f);
-                            
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 5);
-                            let unk = f.read_u32::<BigEndian>()?;
-
-                            if camera_type == 3 {
-                                let section_id = f.read_u8()?;
-                                assert_eq!(section_id, 6);
-                                let distances = read_2_floats(&mut f);
-
-                                Camera::Type3 { id, position, speed, rot_acc, angles, unk, distances }
-                            } else {
-                                Camera::Type1 { id, position, speed, rot_acc, angles, unk }
-                            }
-                        },
-                        2 => {
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 1);
-                            let position = read_3_floats(&mut f);
-
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 2);
-                            let angles = read_3_floats(&mut f);
-
-                            Camera::Type2 { id, position, angles }
-                        },
-                        4 => {
-                            let section_id = f.read_u8()?;
-                            assert_eq!(section_id, 1);
-                            let unk = f.read_u32::<BigEndian>()?;
-
-                            Camera::Type4 { id, unk }
-                        },
-                        _ => panic!("camera_type: {:?}", camera_type)
-                    };
-
-                    cameras.push(camera);
-
-                    if camera_type != 0 {
-                        let end_of_camera = f.read_u8()?;
-                        assert_eq!(end_of_camera, 0);
-                    }
-
-                    start_of_camera = f.read_u8()?;
-                }
-                assert_eq!(start_of_camera, 0); // end of list
-            } else if header == 4 {
-                let mut first_section_id = f.read_u8()?;
-                while first_section_id == 1 {
+            let camera = match camera_type {
+                0 => {
+                    Camera::Type0 { id }
+                },
+                1 | 3 => {
                     let section_id = f.read_u8()?;
-                    assert_eq!(section_id, 2);
+                    assert_eq!(section_id, 1);
                     let position = read_3_floats(&mut f);
 
                     let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 2);
+                    let speed = read_2_floats(&mut f);
+                    
+                    let section_id = f.read_u8()?;
                     assert_eq!(section_id, 3);
-                    let unk = read_2_floats(&mut f);
-
+                    let rot_acc = read_2_floats(&mut f);
+                    
                     let section_id = f.read_u8()?;
                     assert_eq!(section_id, 4);
-                    let colours = read_3_u32(&mut f);
+                    let angles = read_3_floats(&mut f);
+                    
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 5);
+                    let unk = f.read_u32::<BigEndian>()?;
 
-                    lightings.push(Lighting { position, unk, colours });
+                    if camera_type == 3 {
+                        let section_id = f.read_u8()?;
+                        assert_eq!(section_id, 6);
+                        let distances = read_2_floats(&mut f);
 
-                    first_section_id = f.read_u8()?;
-                }
-                first_section_id = f.read_u8()?;
-                assert_eq!(first_section_id, 0);
-            } else if header == 1 {
-                voxels.push(Voxel {
-                    position: Vector3 { x: loc_x, y: loc_y, z: loc_z },
-                    complex_objects: vec![],
-                    small_objects: vec![],
-                    missing: true,
-                });
-            } else {
-                panic!("> header = 0x{:X}", header);
+                        Camera::Type3 { id, position, speed, rot_acc, angles, unk, distances }
+                    } else {
+                        Camera::Type1 { id, position, speed, rot_acc, angles, unk }
+                    }
+                },
+                2 => {
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 1);
+                    let position = read_3_floats(&mut f);
+
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 2);
+                    let angles = read_3_floats(&mut f);
+
+                    Camera::Type2 { id, position, angles }
+                },
+                4 => {
+                    let section_id = f.read_u8()?;
+                    assert_eq!(section_id, 1);
+                    let unk = f.read_u32::<BigEndian>()?;
+
+                    Camera::Type4 { id, unk }
+                },
+                _ => panic!("camera_type: {:?}", camera_type)
+            };
+
+            cameras.push(camera);
+
+            if camera_type != 0 {
+                let end_of_camera = f.read_u8()?;
+                assert_eq!(end_of_camera, 0);
             }
+
+            start_of_camera = f.read_u8()?;
         }
+        assert_eq!(start_of_camera, 0);
+
+        let header = f.read_u8()?;
+        assert_eq!(header, 4);
+
+        let mut first_section_id = f.read_u8()?;
+        while first_section_id == 1 {
+            let section_id = f.read_u8()?;
+            assert_eq!(section_id, 2);
+            let position = read_3_floats(&mut f);
+
+            let section_id = f.read_u8()?;
+            assert_eq!(section_id, 3);
+            let unk = read_2_floats(&mut f);
+
+            let section_id = f.read_u8()?;
+            assert_eq!(section_id, 4);
+            let colours = read_3_u32(&mut f);
+
+            lightings.push(Lighting { position, unk, colours });
+
+            first_section_id = f.read_u8()?;
+        }
+        assert_eq!(first_section_id, 0);
+        first_section_id = f.read_u8()?;
+        assert_eq!(first_section_id, 0);
 
         Ok(SetupFile {
             cameras,
