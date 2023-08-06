@@ -650,9 +650,9 @@ impl SetupFile {
         })
     }
 
-    pub fn read_yaml(filename: &str) -> Option<SetupFile> {
+    pub fn read_yaml(filename: &str) -> Option<Self> {
         let f = File::open(filename).expect(&format!("Can't open {}", filename));
-        let ret: Result<SetupFile, serde_yaml::Error> = serde_yaml::from_reader(f);
+        let ret: Result<Self, serde_yaml::Error> = serde_yaml::from_reader(f);
         match ret {
             Ok(file) => Some(file),
             Err(_) => None,

@@ -35,7 +35,6 @@ pub struct Model {
 
 #[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown20 {
-    unk0: u8,
     unk1: u8,
     unk2: i16,
     unk3: i16,
@@ -744,32 +743,6 @@ impl Model {
         for texture in &textures {
             assert_eq!(texture.offset + start, f.seek(SeekFrom::Current(0))? as u32);
             f.seek(SeekFrom::Current(texture.size as i64))?;
-            /*
-            match texture.format {
-                TextureFormat::C4 => {
-                    //let size = (texture.width as i64) * (texture.height as i64) / 2 + 32;
-                    f.seek(SeekFrom::Current(size))?;
-                },
-                TextureFormat::C8 => {
-                    let size = (texture.width as i64) * (texture.height as i64) + 512;
-                    assert_eq!(size, texture.size as i64);
-                    f.seek(SeekFrom::Current(size))?;
-                },
-                TextureFormat::Rgba16 => {
-                    //let size = (texture.width as i64) * (texture.height as i64) * count;
-                },
-                TextureFormat::Rgba32 => {
-                    let size = (texture.width as i64) * (texture.height as i64) * 4;
-                    assert_eq!(size, texture.size as i64);
-                    f.seek(SeekFrom::Current(size))?;
-                },
-                TextureFormat::IA8 => {
-                    let size = (texture.width as i64) * (texture.height as i64);
-                    assert_eq!(size, texture.size as i64);
-                    f.seek(SeekFrom::Current(size))?;
-                },
-                //_ => panic!("Unhandled texture format {:?}", texture.format),
-            };*/
         }
 
         // DISPLAY LIST
@@ -1176,8 +1149,6 @@ impl Model {
                 });
             }
 
-            // for some reason, all models don't have the same size (unknown why)
-            // 02D2 has one fewer byte than 02D1 here
             // maybe 8 bytes alignments?
             let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
             if alignment < 8 {
@@ -1267,9 +1238,9 @@ impl Model {
         if unk20 > 0 {
             assert_eq!(unk20 as u64, f.seek(SeekFrom::Current(0))?);
 
-            unknown20.unk0 = f.read_u8()?; // count of "unk2 to unk9"?
+            let count = f.read_u8()?;
             unknown20.unk1 = f.read_u8()?;
-            for _ in 0..unknown20.unk0 {
+            for _ in 0..count {
                 unknown20.unk2 = f.read_i16::<BigEndian>()?;
                 unknown20.unk3 = f.read_i16::<BigEndian>()?;
                 unknown20.unk4 = f.read_i16::<BigEndian>()?;
@@ -1298,9 +1269,7 @@ impl Model {
             }
         }
 
-        println!("geometry_offset {:#X} / {:#X}", f.seek(SeekFrom::Current(0))?, geometry_offset);
         assert_eq!(geometry_offset as u64, f.seek(SeekFrom::Current(0))?);
-        //let geometry = vec![];
         let geometry = read_geometry_layout(&mut f)?;
 
         Ok(Self {
@@ -1318,8 +1287,12 @@ impl Model {
     }
 
     pub fn read_yaml(filename: &str) -> Option<Self> {
-        //Some(Self {})
-        None
+        let f = File::open(filename).expect(&format!("Can't open {}", filename));
+        let ret: Result<Self, serde_yaml::Error> = serde_yaml::from_reader(f);
+        match ret {
+            Ok(file) => Some(file),
+            Err(_) => None,
+        }
     }
 
     pub fn write_bin(&self, filename: &str) -> std::io::Result<()> {
@@ -1340,30 +1313,13 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
     let file_size = f.metadata().unwrap().len();
     let offset = f.seek(SeekFrom::Current(0))?;
     let geocode = f.read_u32::<BigEndian>()?;
-    //println!("geocode {:#X} at {:#X}", geocode, offset);
 
     let geocmd = match geocode {
         0x0 => {
-            //let unk = f.read_u32::<BigEndian>()?;
             let len = f.read_u32::<BigEndian>()?;
             let unk1 = f.read_u16::<BigEndian>()?;
             let unk2 = f.read_u16::<BigEndian>()?;
             let unk3 = read_3_floats(f);
-
-            // only the last one doesn't have "padding"
-            if f.seek(SeekFrom::Current(0))? < file_size {
-                //let padding = f.read_u32::<BigEndian>()?;
-            }
-
-            println!("len: {:#X}", len);
-            println!("unk1: {:?}", unk1);
-            println!("unk2: {:?}", unk2);
-            println!("unk3: {:?}", unk3);
-            
-            //let _ = f.read_u32::<BigEndian>()?;
-            //let _ = f.read_u16::<BigEndian>()?;
-            //let _ = f.read_u16::<BigEndian>()?;
-            //let _ = read_3_floats(f);
 
             Geometry::Unknown0x00 { len: 0 }
         },
@@ -1439,26 +1395,19 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             Geometry::ReferencePoint { index, bone, x, y, z }
         },
         0xC => {
-            println!("=====");
             let len = f.read_u32::<BigEndian>()?;
             let child_count = f.read_u16::<BigEndian>()?;
             let selector = f.read_u16::<BigEndian>()?;
-            println!("len: {:?}", len);
-            println!("child_count: {:?}", child_count);
-            println!("selector: {:?}", selector);
 
             let mut indices = vec![];
 
             for _ in 0..child_count {
                 let index = f.read_i32::<BigEndian>()?;
                 indices.push(index);
-                println!("child: {:?}", index);
             }
 
-            if child_count % 2 == 0 {
-                //let _ = f.read_i32::<BigEndian>()?;
-            }
-
+            // there are no good way to detect that data so
+            // looking for the next command is done for now
             let mut last_word_read = f.read_u32::<BigEndian>()?;
             while last_word_read != 2 && last_word_read != 3 {
                 last_word_read = f.read_u32::<BigEndian>()?;
@@ -1467,15 +1416,6 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             f.seek(SeekFrom::Current(-4))?;
 
             let mut commands = vec![];
-
-            /*if len == 0 {
-                for c in 0..child_count {
-                    let unk1 = f.read_u32::<BigEndian>()?;
-                    let unk2 = f.read_u32::<BigEndian>()?;
-                    let unk3 = f.read_u32::<BigEndian>()?;
-                    let unk4 = f.read_u32::<BigEndian>()?;
-                }
-            }*/
 
             Geometry::Selector { selector, indices, commands }
         },
