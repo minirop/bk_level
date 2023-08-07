@@ -258,8 +258,7 @@ pub enum F3dex {
     LoadTile { upper_left_s: u16, upper_left_t: u16, descriptor: u8, lower_right_s: u16, lower_right_t: u16 },
     SetTile { format: ColourFormat, depth: u8, values_per_row: u16,
         tmem_offset: u16, descriptor: u8, palette: u8,
-        clamp_mirror_y: u8, unwrapped_y: u8, perspective_div_y: u8,
-        clamp_mirror_x: u8, unwrapped_x: u8, perspective_div_x: u8 },
+        clamp_mirror: Vector2<u8>, unwrapped: Vector2<u8>, perspective_div: Vector2<u8> },
     SetCombine { unk1: u8, unk2: u16, unk3: u32 },
     SettImg { format: ColourFormat, depth: u8, address: u32, unk: u8 },
 }
@@ -272,10 +271,10 @@ pub enum Geometry {
     Bone { address: u16, len: u8, id: u8, unk: u16 },
     LoadDisplayList { len: u32, offset: u16, tri_count: u16 },
     Skinning,
-    Lod { layout_offset: u32, max_dist: f32, min_dist: f32, test_x: f32, test_y: f32, test_z: f32 },
+    Lod { layout_offset: u32, max_dist: f32, min_dist: f32, test: Vector3<f32> },
     ReferencePoint { index: u16, bone: u16, x: f32, y: f32, z: f32 },
     Selector { selector: u16, indices: Vec<i32>, commands: Vec<Geometry> },
-    DrawDistance { len: u16, min_x: i16, min_y: i16, min_z: i16, max_x: i16, max_y: i16, max_z: i16, unk1: u32, unk2: u16 },
+    DrawDistance { len: u16, min: Vector3<i16>, max: Vector3<i16>, unk1: u32, unk2: u16 },
     Unknown0x0e,
     Group0x0f { header: Vec<u32>, commands: Vec<Geometry> },
     Unknown0x10 { len: u32, unk1: u32, unk2: u32 },
@@ -984,8 +983,14 @@ impl Model {
                     let perspective_div_x = b7 & 0b1111;
 
                     F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
-                        palette, clamp_mirror_y, unwrapped_y, perspective_div_y,
-                        clamp_mirror_x, unwrapped_x, perspective_div_x }
+                        palette, clamp_mirror: Vector2 {
+                            x: clamp_mirror_x, y: clamp_mirror_y,
+                        }, unwrapped: Vector2 {
+                            x: unwrapped_x, y: unwrapped_y,
+                        }, perspective_div: Vector2 {
+                            x: perspective_div_x, y: perspective_div_y,
+                        }
+                    }
                 },
                 0xFC => {
                     let unk1 = f.read_u8()?;
@@ -1436,12 +1441,10 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let layout_offset = f.read_u32::<BigEndian>()?;
             let max_dist = f.read_f32::<BigEndian>()?;
             let min_dist = f.read_f32::<BigEndian>()?;
-            let test_x = f.read_f32::<BigEndian>()?;
-            let test_y = f.read_f32::<BigEndian>()?;
-            let test_z = f.read_f32::<BigEndian>()?;
+            let test = read_3_floats(f);
             let len = f.read_u32::<BigEndian>()?; assert_eq!(len, 0x20);
 
-            Geometry::Lod { layout_offset, max_dist, min_dist, test_x, test_y, test_z }
+            Geometry::Lod { layout_offset, max_dist, min_dist, test }
         },
         0xA => {
             let len = f.read_u32::<BigEndian>()?;
@@ -1480,12 +1483,8 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
         },
         0xD => {
             let unk1 = f.read_u32::<BigEndian>()?;
-            let min_x = f.read_i16::<BigEndian>()?;
-            let min_y = f.read_i16::<BigEndian>()?;
-            let min_z = f.read_i16::<BigEndian>()?;
-            let max_x = f.read_i16::<BigEndian>()?;
-            let max_y = f.read_i16::<BigEndian>()?;
-            let max_z = f.read_i16::<BigEndian>()?;
+            let min = read_3_i16(f);
+            let max = read_3_i16(f);
             let len = f.read_u16::<BigEndian>()?;
             let unk2 = f.read_u16::<BigEndian>()?;
 
@@ -1493,7 +1492,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
                 read_geometry_layout_command(f)?;
             }
 
-            Geometry::DrawDistance { len, min_x, min_y, min_z, max_x, max_y, max_z, unk1, unk2 }
+            Geometry::DrawDistance { len, min, max, unk1, unk2 }
         },
         0xE => {
             let len = f.read_u32::<BigEndian>()?;
