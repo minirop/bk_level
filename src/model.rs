@@ -24,30 +24,24 @@ pub struct Model {
     textures: Vec<Texture>,
     commands: Vec<F3dex>,
     vertex_data: VertexData,
-    collisions: Collisions,
+    collisions: Option<Collisions>,
     geometry: Vec<Geometry>,
-    unk14: ModelUnk14,
-    unk20: Unknown20List,
+    unk14: Option<ModelUnk14>,
+    unk20: Option<Unknown20List>,
     unk28: Vec<ModelUnk28>,
     mesh_list: Vec<Mesh>,
     geometry_type: u16,
     unk30: u16,
     unk34: f32,
     unk_display_list: u32,
-    animations: AnimationList,
+    animation_list: Option<AnimationList>,
     animated_textures: Vec<Frame>,
 }
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown20List {
     unk1: u8,
     list: Vec<Unknown20>,
-}
-
-impl Unknown20List {
-    fn new() -> Self {
-        Default::default()
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -64,7 +58,7 @@ pub struct Mesh {
     vertices: Vec<u16>,
 }
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vertex {
     position: Vector3<i16>,
     flag: u16,
@@ -75,14 +69,8 @@ pub struct Vertex {
     a: f32,
 }
 
-impl Vertex {
-    fn new() -> Self {
-        Default::default()
-    }
-}
 
-
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct VertexData {
     min_coord: Vector3<i16>,
     max_coord: Vector3<i16>,
@@ -90,12 +78,6 @@ pub struct VertexData {
     local_norm: i16,
     global_norm: i16,
     vertices: Vec<Vertex>,
-}
-
-impl VertexData {
-    fn new() -> Self {
-        Default::default()
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -149,7 +131,7 @@ pub struct TriColl {
     flags: u32,
 }
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collisions {
     min: Vector3<i16>,
     max: Vector3<i16>,
@@ -157,13 +139,6 @@ pub struct Collisions {
     scale: u16,
     geo: Vec<GeoColl>,
     tri: Vec<TriColl>,
-    unknown: Option<u32>,
-}
-
-impl Collisions {
-    fn new() -> Self {
-        Default::default()
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -196,17 +171,12 @@ pub struct ModelUnk14_2 {
     unk4: u8,
 }
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelUnk14 {
+    unk: u16,
     unk14_0: Vec<ModelUnk14_0>,
     unk14_1: Vec<ModelUnk14_1>,
     unk14_2: Vec<ModelUnk14_2>,
-}
-
-impl ModelUnk14 {
-    fn new() -> Self {
-        Default::default()
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -216,16 +186,10 @@ pub struct ModelUnk28 {
     vtx_list: Vec<u16>,
 }
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AnimationList {
     unk: f32,
     animations: Vec<Animation>,
-}
-
-impl AnimationList {
-    fn new() -> Self {
-        Default::default()
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -356,20 +320,17 @@ impl Model {
 
         let mut vertices: Vec<Vertex> = vec![];
         for _ in 0..vt_count {
-            let mut vert = Vertex::new();
+            let position = read_3_i16(&mut f);
+            let flag = f.read_u16::<BigEndian>()?;
+            let uv = read_2_i16(&mut f);
+            let r = (f.read_u8()? as f32) / 256.0;
+            let g = (f.read_u8()? as f32) / 256.0;
+            let b = (f.read_u8()? as f32) / 256.0;
+            let a = (f.read_u8()? as f32) / 256.0;
 
-            vert.position.x = f.read_i16::<BigEndian>()?;
-            vert.position.y = f.read_i16::<BigEndian>()?;
-            vert.position.z = f.read_i16::<BigEndian>()?;
-            vert.flag = f.read_u16::<BigEndian>()?;
-            vert.uv.x = f.read_i16::<BigEndian>()?;
-            vert.uv.y = f.read_i16::<BigEndian>()?;
-            vert.r = (f.read_u8()? as f32) / 256.0;
-            vert.g = (f.read_u8()? as f32) / 256.0;
-            vert.b = (f.read_u8()? as f32) / 256.0;
-            vert.a = (f.read_u8()? as f32) / 256.0;
-
-            vertices.push(vert);
+            vertices.push(Vertex {
+                position, flag, uv, r, g, b, a
+            });
         }
 
         // READ TEXTURES
@@ -1076,27 +1037,24 @@ impl Model {
 
         let mut vertices = vec![];
         for _ in 0..vertices_count {
-            let mut vertex = Vertex::new();
+            let position = read_3_i16(&mut f);
+            let flag = f.read_u16::<BigEndian>()?;
+            let uv = read_2_i16(&mut f);
+            let r = (f.read_u8()? as f32) / 256.0;
+            let g = (f.read_u8()? as f32) / 256.0;
+            let b = (f.read_u8()? as f32) / 256.0;
+            let a = (f.read_u8()? as f32) / 256.0;
 
-            vertex.position.x = f.read_i16::<BigEndian>()?;
-            vertex.position.y = f.read_i16::<BigEndian>()?;
-            vertex.position.z = f.read_i16::<BigEndian>()?;
-            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-            vertex.uv.x = f.read_i16::<BigEndian>()?;
-            vertex.uv.y = f.read_i16::<BigEndian>()?;
-            vertex.r = (f.read_u8()? as f32) / 256.0;
-            vertex.g = (f.read_u8()? as f32) / 256.0;
-            vertex.b = (f.read_u8()? as f32) / 256.0;
-            vertex.a = (f.read_u8()? as f32) / 256.0;
-
-            vertices.push(vertex);
+            vertices.push(Vertex {
+                position, flag, uv, r, g, b, a
+            });
         }
 
         let vertex_data = VertexData {
             min_coord, max_coord, centre_coord, local_norm, global_norm, vertices
         };
 
-        let mut unk14 = ModelUnk14::new();
+        let mut unk14 = None;
 
         if unk14_offset > 0 {
             assert_eq!(unk14_offset as u64, f.seek(SeekFrom::Current(0))?);
@@ -1104,7 +1062,11 @@ impl Model {
             let unk14_0_count = f.read_u16::<BigEndian>()?;
             let unk14_1_count = f.read_u16::<BigEndian>()?;
             let unk14_2_count = f.read_u16::<BigEndian>()?;
-            let unk14_3 = f.read_u16::<BigEndian>()?;
+            let unk = f.read_u16::<BigEndian>()?;
+
+            let mut unk14_0 = vec![];
+            let mut unk14_1 = vec![];
+            let mut unk14_2 = vec![];
 
             for _ in 0..unk14_0_count {
                 let unk1 = read_3_i16(&mut f);
@@ -1115,7 +1077,7 @@ impl Model {
                 let unk6 = f.read_u8()?;
                 let unk7 = f.read_u8()?;
 
-                unk14.unk14_0.push(ModelUnk14_0 {
+                unk14_0.push(ModelUnk14_0 {
                     unk1, unk2, unk3, unk4, unk5, unk6, unk7
                 });
             }
@@ -1129,7 +1091,7 @@ impl Model {
                 let unk6 = f.read_u8()?;
                 let unk7 = f.read_u8()?;
 
-                unk14.unk14_1.push(ModelUnk14_1 {
+                unk14_1.push(ModelUnk14_1 {
                     unk1, unk2, unk3, unk4, unk5, unk6, unk7
                 });
             }
@@ -1141,10 +1103,14 @@ impl Model {
                 let unk4 = f.read_u8()?;
                 let padding = f.read_u16::<BigEndian>()?;
 
-                unk14.unk14_2.push(ModelUnk14_2 {
+                unk14_2.push(ModelUnk14_2 {
                     unk1, unk2, unk3, unk4
                 });
             }
+
+            unk14 = Some(ModelUnk14 {
+                unk, unk14_0, unk14_1, unk14_2
+            });
 
             // 8 bit alignment?
             let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
@@ -1155,7 +1121,7 @@ impl Model {
             }
         }
 
-        let mut collisions = Collisions::new();
+        let mut collisions = None;
         if collision_setup > 0 {
             assert_eq!(collision_setup as u64, f.seek(SeekFrom::Current(0))?);
 
@@ -1166,29 +1132,31 @@ impl Model {
             let max_y = f.read_i16::<BigEndian>()?;
             let max_z = f.read_i16::<BigEndian>()?;
 
-            collisions.min = Vector3 { x: min_x, y: min_y, z: min_z };
-            collisions.max = Vector3 { x: max_x, y: max_y, z: max_z };
+            let min = Vector3 { x: min_x, y: min_y, z: min_z };
+            let max = Vector3 { x: max_x, y: max_y, z: max_z };
 
             let y_stride = f.read_i16::<BigEndian>()?;
             let z_stride = f.read_i16::<BigEndian>()?;
 
-            collisions.stride = Vector2 { x: y_stride, y: z_stride };
+            let stride = Vector2 { x: y_stride, y: z_stride };
 
             let geo_count = f.read_i16::<BigEndian>()?;
-            collisions.scale = f.read_u16::<BigEndian>()?;
+            let scale = f.read_u16::<BigEndian>()?;
             let tri_count = f.read_i16::<BigEndian>()?;
             let padding = f.read_i16::<BigEndian>()?; assert_eq!(padding, 0);
 
+            let mut geo = vec![];
             for _ in 0..geo_count {
                 let start_tri_index = f.read_u16::<BigEndian>()?;
                 let tri_count = f.read_u16::<BigEndian>()?;
 
-                collisions.geo.push(GeoColl {
+                geo.push(GeoColl {
                     start_tri_index,
                     tri_count,
                 });
             }
 
+            let mut tri = vec![];
             for _ in 0..tri_count {
                 let vtx_indx_1 = f.read_u16::<BigEndian>()?;
                 let vtx_indx_2 = f.read_u16::<BigEndian>()?;
@@ -1196,7 +1164,7 @@ impl Model {
                 let unk = f.read_u16::<BigEndian>()?;
                 let flags = f.read_u32::<BigEndian>()?;
 
-                collisions.tri.push(TriColl {
+                tri.push(TriColl {
                     vtx_indx_1,
                     vtx_indx_2,
                     vtx_indx_3,
@@ -1204,6 +1172,10 @@ impl Model {
                     flags,
                 });
             }
+
+            collisions = Some(Collisions {
+                min, max, stride, scale, geo, tri
+            });
 
             // maybe 8 bytes alignments?
             let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
@@ -1279,43 +1251,54 @@ impl Model {
             }
         }
 
-        let mut animations = AnimationList::new();
+        let mut animation_list = None;
         if animation_setup > 0 {
             assert_eq!(animation_setup as u64, f.seek(SeekFrom::Current(0))?);
 
-            animations.unk = f.read_f32::<BigEndian>()?;
+            let unk = f.read_f32::<BigEndian>()?;
             let count = f.read_u16::<BigEndian>()?;
             let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
 
+            let mut animations = vec![];
             for _ in 0..count {
                 let unk = read_3_floats(&mut f);
                 let bone = f.read_i16::<BigEndian>()?;
                 let mtx = f.read_i16::<BigEndian>()?;
 
-                animations.animations.push(Animation {
+                animations.push(Animation {
                     unk, bone, mtx
                 });
             }
+
+            animation_list = Some(AnimationList {
+                unk, animations
+            });
         }
 
         // not sure about unk20's position. There are no files in BK that
         // have unk20 AND animation_setup or unk28
-        let mut unknown20 = Unknown20List::new();
+        let mut unknown20 = None;
         if unk20 > 0 {
             assert_eq!(unk20 as u64, f.seek(SeekFrom::Current(0))?);
 
             let count = f.read_u8()?;
-            unknown20.unk1 = f.read_u8()?;
+            let unk1 = f.read_u8()?;
+
+            let mut list = vec![];
             for _ in 0..count {
                 let unk1 = read_3_i16(&mut f);
                 let unk2 = read_3_i16(&mut f);
                 let unk3 = f.read_u8()?;
                 let unk4 = f.read_u8()?;
 
-                unknown20.list.push(Unknown20 {
+                list.push(Unknown20 {
                     unk1, unk2, unk3, unk4
                 });
             }
+
+            unknown20 = Some(Unknown20List {
+                unk1, list
+            });
 
             let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
             if alignment < 8 {
@@ -1357,7 +1340,7 @@ impl Model {
             unk34,
             unk_display_list,
             vertex_data,
-            animations,
+            animation_list,
             animated_textures,
         })
     }
