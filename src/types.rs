@@ -56,6 +56,12 @@ pub fn read_3_i16(f: &mut File) -> Vector3<i16> {
     Vector3 { x, y, z }
 }
 
+pub fn read_2_i16(f: &mut File) -> Vector2<i16> {
+    let x = f.read_i16::<BigEndian>().unwrap();
+    let y = f.read_i16::<BigEndian>().unwrap();
+    Vector2 { x, y }
+}
+
 pub fn read_3_u8(f: &mut File) -> Vector3<u8> {
     let x = f.read_u8().unwrap();
     let y = f.read_u8().unwrap();

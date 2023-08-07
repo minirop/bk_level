@@ -27,29 +27,37 @@ pub struct Model {
     collisions: Collisions,
     geometry: Vec<Geometry>,
     unk14: ModelUnk14,
-    unk20: Unknown20,
-    unk28: u32,
+    unk20: Unknown20List,
+    unk28: Vec<ModelUnk28>,
     mesh_list: Vec<Mesh>,
     geometry_type: u16,
+    unk30: u16,
+    unk34: f32,
+    unk_display_list: u32,
+    coord_range: Vector2<i16>,
+    coll_range: Vector2<i16>,
+    animations: AnimationList,
+    animated_textures: Vec<Frame>,
 }
 
 #[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Unknown20 {
+pub struct Unknown20List {
     unk1: u8,
-    unk2: i16,
-    unk3: i16,
-    unk4: i16,
-    unk5: i16,
-    unk6: i16,
-    unk7: i16,
-    unk8: u8,
-    unk9: u8,
+    list: Vec<Unknown20>,
 }
 
-impl Unknown20 {
+impl Unknown20List {
     fn new() -> Self {
         Default::default()
     }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Unknown20 {
+    unk1: Vector3<i16>,
+    unk2: Vector3<i16>,
+    unk3: u8,
+    unk4: u8,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -150,6 +158,8 @@ pub struct ModelUnk14_0 {
     unk3: Vector3<i16>,
     unk4: Vector3<u8>,
     unk5: u8,
+    unk6: u8,
+    unk7: u8,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -160,6 +170,7 @@ pub struct ModelUnk14_1 {
     unk4: Vector3<u8>,
     unk5: u8,
     unk6: u8,
+    unk7: u8,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -181,6 +192,39 @@ impl ModelUnk14 {
     fn new() -> Self {
         Default::default()
     }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelUnk28 {
+    coord: Vector3<i16>,
+    anim_index: u8,
+    vtx_list: Vec<u16>,
+}
+
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AnimationList {
+    unk: f32,
+    animations: Vec<Animation>,
+}
+
+impl AnimationList {
+    fn new() -> Self {
+        Default::default()
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Animation {
+    unk: Vector3<f32>,
+    bone: i16,
+    mtx: i16,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Frame {
+    size: u16,
+    count: u16,
+    rate: f32,
 }
 
 struct Command {
@@ -229,7 +273,7 @@ pub enum F3dex {
     Triangle1 { v1: u8, v2: u8, v3: u8 },
     RdpLoadSync,
     RdpPipeSync,
-    LoadTlut { descriptor: u8 },
+    LoadTlut { descriptor: u8, colour_count: u16 },
     SetTileSize { upper_left_s: u16, upper_left_t: u16, descriptor: u8, width: u16, height: u16 },
     LoadBlock { upper_left_s: u16, upper_left_t: u16, descriptor: u8, texels_count: u16, dxt: u16 },
     LoadTile { upper_left_s: u16, upper_left_t: u16, descriptor: u8, lower_right_s: u16, lower_right_t: u16 },
@@ -237,8 +281,8 @@ pub enum F3dex {
         tmem_offset: u16, descriptor: u8, palette: u8,
         clamp_mirror_y: u8, unwrapped_y: u8, perspective_div_y: u8,
         clamp_mirror_x: u8, unwrapped_x: u8, perspective_div_x: u8 },
-    SetCombine {},
-    SettImg { format: ColourFormat, depth: u8, address: u32 },
+    SetCombine { unk1: u8, unk2: u16, unk3: u32 },
+    SettImg { format: ColourFormat, depth: u8, address: u32, unk: u8 },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -691,13 +735,12 @@ impl Model {
         println!("animation_setup {:#X}", animation_setup);
         println!("animated_textures_offset {:#X}", animated_textures_offset);
         println!("geometry_offset {:#X}", geometry_offset);
-        println!("===============================\n");
+        println!("===============================");
         
-        let unk = f.read_u16::<BigEndian>()?;
-        println!("unk (vertices_count): {}", unk);
+        let unk30 = f.read_u16::<BigEndian>()?;
         let vertices_count = f.read_u16::<BigEndian>()?;
         
-        let unk2 = f.read_f32::<BigEndian>()?; // scale?
+        let unk34 = f.read_f32::<BigEndian>()?; // scale?
 
         // TEXTURES
         assert!(texture_setup_offset != 0);
@@ -750,8 +793,7 @@ impl Model {
         assert_eq!(display_list_setup_offset as u64, f.seek(SeekFrom::Current(0))?);
 
         let commands_count = f.read_u32::<BigEndian>()?;
-        let unk = f.read_u32::<BigEndian>()?;
-        println!("unk (commands count): 0x{:X}", unk);
+        let unk_display_list = f.read_u32::<BigEndian>()?;
 
         let mut commands = vec![];
 
@@ -894,7 +936,7 @@ impl Model {
                     let descriptor = descriptor as u8;
                     let colour_count = (((colour_count >> 4) - 1) & 0x3FF) * 4;
 
-                    F3dex::LoadTlut { descriptor }
+                    F3dex::LoadTlut { descriptor, colour_count }
                 },
                 0xF2 => {
                     let s = f.read_u8()? as u16;
@@ -972,11 +1014,13 @@ impl Model {
                         clamp_mirror_x, unwrapped_x, perspective_div_x }
                 },
                 0xFC => {
-                    let todo = f.read_u8()?;
-                    let todo = f.read_u16::<BigEndian>()?;
-                    let todo = f.read_u32::<BigEndian>()?;
+                    let unk1 = f.read_u8()?;
+                    let unk2 = f.read_u16::<BigEndian>()?;
+                    let unk3 = f.read_u32::<BigEndian>()?;
 
-                    F3dex::SetCombine {}
+                    // [aaaa] [ccccc] [eee] [ggg] [iiii] [kkkkk] [bbbb] [jjjj] [mmm] [ooo] [ddd] [fff] [hhh] [lll] [nnn] [ppp]
+
+                    F3dex::SetCombine { unk1, unk2, unk3 }
                 },
                 0xFD => {
                     let flags = f.read_u8()?;
@@ -995,7 +1039,7 @@ impl Model {
 
                     let depth = 4 * 2u8.pow(((flags >> 3) & 0b11) as u32);
 
-                    F3dex::SettImg { format, depth, address }
+                    F3dex::SettImg { format, depth, address, unk }
                 },
                 _ => panic!("Unknown F3DEX command 0x{:X}", cmd),
             };
@@ -1014,16 +1058,13 @@ impl Model {
         let pos_y = f.read_i16::<BigEndian>()?;
         let pos_z = f.read_i16::<BigEndian>()?;
 
-        let coord_range1 = f.read_i16::<BigEndian>()?;
-        let coord_range2 = f.read_i16::<BigEndian>()?;
-
-        let coll_range1 = f.read_i16::<BigEndian>()?;
-        let coll_range2 = f.read_i16::<BigEndian>()?;
+        let coord_range = read_2_i16(&mut f);
+        let coll_range = read_2_i16(&mut f);
 
         let vertices_count_2 = f.read_u16::<BigEndian>()?;
         assert_eq!(vertices_count, vertices_count_2);
 
-        let unk = f.read_u16::<BigEndian>()?;
+        let unk_vertices = f.read_u16::<BigEndian>()?;
 
         let mut vertices: Vec<Vertex> = vec![];
         for _ in 0..vertices_count {
@@ -1032,8 +1073,7 @@ impl Model {
             vertex.position.x = f.read_i16::<BigEndian>()?;
             vertex.position.y = f.read_i16::<BigEndian>()?;
             vertex.position.z = f.read_i16::<BigEndian>()?;
-            let padding = f.read_u16::<BigEndian>()?;
-            assert_eq!(padding, 0);
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
             vertex.uv.x = f.read_i16::<BigEndian>()?;
             vertex.uv.y = f.read_i16::<BigEndian>()?;
             vertex.r = (f.read_u8()? as f32) / 256.0;
@@ -1060,11 +1100,11 @@ impl Model {
                 let unk3 = read_3_i16(&mut f);
                 let unk4 = read_3_u8(&mut f);
                 let unk5 = f.read_u8()?;
-                let padding = f.read_u8()?;
-                let padding = f.read_u8()?;
+                let unk6 = f.read_u8()?;
+                let unk7 = f.read_u8()?;
 
                 unk14.unk14_0.push(ModelUnk14_0 {
-                    unk1, unk2, unk3, unk4, unk5
+                    unk1, unk2, unk3, unk4, unk5, unk6, unk7
                 });
             }
 
@@ -1078,7 +1118,7 @@ impl Model {
                 let unk7 = f.read_u8()?;
 
                 unk14.unk14_1.push(ModelUnk14_1 {
-                    unk1, unk2, unk3, unk4, unk5, unk6
+                    unk1, unk2, unk3, unk4, unk5, unk6, unk7
                 });
             }
 
@@ -1088,6 +1128,10 @@ impl Model {
                 let unk3 = f.read_u8()?;
                 let unk4 = f.read_u8()?;
                 let padding = f.read_u16::<BigEndian>()?;
+
+                unk14.unk14_2.push(ModelUnk14_2 {
+                    unk1, unk2, unk3, unk4
+                });
             }
 
             // 8 bit alignment?
@@ -1189,6 +1233,7 @@ impl Model {
             }
         }
 
+        let mut unknown28 = vec![];
         if unk28 > 0 {
             assert_eq!(unk28 as u64, f.seek(SeekFrom::Current(0))?);
 
@@ -1205,6 +1250,12 @@ impl Model {
                     let vtx_id = f.read_u16::<BigEndian>()?;
                     vtx_list.push(vtx_id);
                 }
+
+                unknown28.push(ModelUnk28 {
+                    coord,
+                    anim_index,
+                    vtx_list,
+                });
             }
 
             // maybe 8 bytes alignments?
@@ -1217,38 +1268,40 @@ impl Model {
         }
 
         // before or after unk20?
+        let mut animations = AnimationList::new();
         if animation_setup > 0 {
             assert_eq!(animation_setup as u64, f.seek(SeekFrom::Current(0))?);
 
-            let unk1 = f.read_f32::<BigEndian>()?;
+            animations.unk = f.read_f32::<BigEndian>()?;
             let count = f.read_u16::<BigEndian>()?;
             let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
 
             for _ in 0..count {
-                let unk11 = f.read_f32::<BigEndian>()?;
-                let unk12 = f.read_f32::<BigEndian>()?;
-                let unk13 = f.read_f32::<BigEndian>()?;
-                let u1 = f.read_i16::<BigEndian>()?;
-                let u2 = f.read_i16::<BigEndian>()?;
-            }
+                let unk = read_3_floats(&mut f);
+                let bone = f.read_i16::<BigEndian>()?;
+                let mtx = f.read_i16::<BigEndian>()?;
 
+                animations.animations.push(Animation {
+                    unk, bone, mtx
+                });
+            }
         }
 
-        let mut unknown20 = Unknown20::new();
+        let mut unknown20 = Unknown20List::new();
         if unk20 > 0 {
             assert_eq!(unk20 as u64, f.seek(SeekFrom::Current(0))?);
 
             let count = f.read_u8()?;
             unknown20.unk1 = f.read_u8()?;
             for _ in 0..count {
-                unknown20.unk2 = f.read_i16::<BigEndian>()?;
-                unknown20.unk3 = f.read_i16::<BigEndian>()?;
-                unknown20.unk4 = f.read_i16::<BigEndian>()?;
-                unknown20.unk5 = f.read_i16::<BigEndian>()?;
-                unknown20.unk6 = f.read_i16::<BigEndian>()?;
-                unknown20.unk7 = f.read_i16::<BigEndian>()?;
-                unknown20.unk8 = f.read_u8()?;
-                unknown20.unk9 = f.read_u8()?;
+                let unk1 = read_3_i16(&mut f);
+                let unk2 = read_3_i16(&mut f);
+                let unk3 = f.read_u8()?;
+                let unk4 = f.read_u8()?;
+
+                unknown20.list.push(Unknown20 {
+                    unk1, unk2, unk3, unk4
+                });
             }
 
             let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
@@ -1259,6 +1312,7 @@ impl Model {
             }
         }
 
+        let mut animated_textures = vec![];
         if animated_textures_offset > 0 {
             assert_eq!(animated_textures_offset as u64, f.seek(SeekFrom::Current(0))?);
 
@@ -1266,6 +1320,10 @@ impl Model {
                 let size = f.read_u16::<BigEndian>()?;
                 let count = f.read_u16::<BigEndian>()?;
                 let rate = f.read_f32::<BigEndian>()?;
+
+                animated_textures.push(Frame {
+                    size, count, rate
+                });
             }
         }
 
@@ -1280,9 +1338,16 @@ impl Model {
             geometry,
             unk14,
             unk20: unknown20,
-            unk28,
+            unk28: unknown28,
             mesh_list,
             geometry_type,
+            unk30,
+            unk34,
+            unk_display_list,
+            coord_range,
+            coll_range,
+            animations,
+            animated_textures,
         })
     }
 
