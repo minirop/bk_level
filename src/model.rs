@@ -265,18 +265,17 @@ pub enum F3dex {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
-    Unknown0x00 { len: u32 },
-    Sort { x1: f32, y1: f32, z1: f32, x2: f32, y2: f32, z2: f32,
-        draw_only_nearest: bool, offset2: u16, len: u32 },
-    Bone { address: u16, len: u8, id: u8, unk: u16 },
+    Unknown0x00 { len: u32, unk1: u16, unk2: u16, unk3: Vector3<f32> },
+    Sort { pos1: Vector3<f32>, pos2: Vector3<f32>, draw_only_nearest: bool, unk1: u16, unk2: u32 },
+    Bone { address: u32, len: u8, id: u8, unk: u16 },
     LoadDisplayList { len: u32, offset: u16, tri_count: u16 },
     Skinning,
     Lod { layout_offset: u32, max_dist: f32, min_dist: f32, test: Vector3<f32> },
-    ReferencePoint { index: u16, bone: u16, x: f32, y: f32, z: f32 },
-    Selector { selector: u16, indices: Vec<i32>, commands: Vec<Geometry> },
-    DrawDistance { len: u16, min: Vector3<i16>, max: Vector3<i16>, unk1: u32, unk2: u16 },
-    Unknown0x0e,
-    Group0x0f { header: Vec<u32>, commands: Vec<Geometry> },
+    ReferencePoint { len: u32, index: u16, bone: u16, pos: Vector3<f32> },
+    Selector { selector: u16, indices: Vec<i32>, commands: Vec<Geometry>, garbage: Vec<u32> },
+    DrawDistance { len: u16, min: Vector3<i16>, max: Vector3<i16>, unk1: u32, unk2: u16, commands: Vec<Geometry> },
+    Unknown0x0e { len: u32, vec1: Vector3<i16>, vec2: Vector3<i16>, commands: Vec<Geometry> },
+    Group0x0f { len: u32, header: Vec<u8>, commands: Vec<Geometry> },
     Unknown0x10 { len: u32, unk1: u32, unk2: u32 },
 }
 
@@ -777,253 +776,7 @@ impl Model {
             assert_eq!(debug_prev_pos + 8, f.seek(SeekFrom::Current(0))?);
             debug_prev_pos = f.seek(SeekFrom::Current(0))?;
 
-            let cmd = f.read_u8()?;
-
-            // move to a function
-            let command = match cmd {
-                0x00 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-                    let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
-                    
-                    F3dex::SPNoOp
-                },
-                0x04 => {
-                    let index = (f.read_u8()? as u16) * 2;
-                    let data = f.read_u16::<BigEndian>()?;
-                    let address = f.read_u32::<BigEndian>()?;
-
-                    let count = (data >> 10) as u8;
-                    let size = data & 0x3FF;
-                    assert_eq!((count as u16) * 0x10 - 1, size);
-
-                    F3dex::Vertex { index, count, address }
-                },
-                0x06 => {
-                    let store_ra = f.read_u8()? != 0;
-                    let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-                    let address = f.read_u32::<BigEndian>()?;
-
-                    F3dex::DisplayList { store_ra, address }
-                },
-                0xB1 => {
-                    let v1 = f.read_u8()? / 2;
-                    let v2 = f.read_u8()? / 2;
-                    let v3 = f.read_u8()? / 2;
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let v4 = f.read_u8()? / 2;
-                    let v5 = f.read_u8()? / 2;
-                    let v6 = f.read_u8()? / 2;
-
-                    F3dex::Triangle2 { v1, v2, v3, v4, v5, v6 }
-                },
-                0xB6 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let flags = f.read_u32::<BigEndian>()?;
-
-                    F3dex::ClearGeometryMode(flags)
-                },
-                0xB7 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let flags = f.read_u32::<BigEndian>()?;
-
-                    F3dex::SetGeometryMode(flags)
-                },
-                0xB8 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-                    let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
-
-                    F3dex::EndDisplayList
-                },
-                0xB9 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let amount = f.read_u8()?;
-                    let count = f.read_u8()?;
-                    let mode = f.read_u32::<BigEndian>()?;
-
-                    // TODO
-                    F3dex::SetOtherModeL { amount, count, mode }
-                },
-                0xBA => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let amount = f.read_u8()?;
-                    let count = f.read_u8()?;
-                    let mode = f.read_u32::<BigEndian>()?;
-
-                    // TODO
-                    F3dex::SetOtherModeH { amount, count, mode }
-                },
-                0xBB => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let flags = f.read_u8()?;
-                    let enable = f.read_u8()? != 0;
-                    let frac_x = f.read_u16::<BigEndian>()?;
-                    let frac_y = f.read_u16::<BigEndian>()?;
-
-                    let mipmaps = flags >> 3;
-                    let descriptor = flags & 0b111;
-                    let scalex = (frac_x as f32) / (0xFFFF as f32);
-                    let scaley = (frac_y as f32) / (0xFFFF as f32);
-
-                    F3dex::Texture { mipmaps, descriptor, enable, scalex, scaley }
-                },
-                0xBD => {
-                    let unk1 = f.read_u8()?;
-                    let unk2 = f.read_u8()?;
-                    let unk3 = f.read_u8()?;
-                    let count = f.read_u32::<BigEndian>()?;
-
-                    F3dex::PopMatrix { unk1, unk2, unk3, count }
-                },
-                0xBF => {
-                    let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
-                    let v1 = f.read_u8()? / 2;
-                    let v2 = f.read_u8()? / 2;
-                    let v3 = f.read_u8()? / 2;
-
-                    F3dex::Triangle1 { v1, v2, v3 }
-                },
-                0xE6 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-                    let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
-                    
-                    F3dex::RdpLoadSync
-                },
-                0xE7 => {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
-                    let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
-                    
-                    F3dex::RdpPipeSync
-                },
-                0xF0 => {
-                    let descriptor = f.read_u32::<BigEndian>()?; assert_eq!(descriptor & 0xFFFFFFF0, 0);
-                    let colour_count = f.read_u16::<BigEndian>()?;
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-
-                    let descriptor = descriptor as u8;
-                    let colour_count = (((colour_count >> 4) - 1) & 0x3FF) * 4;
-
-                    F3dex::LoadTlut { descriptor, colour_count }
-                },
-                0xF2 => {
-                    let s = f.read_u8()? as u16;
-                    let st = f.read_u16::<BigEndian>()?;
-                    let descriptor = f.read_u8()?;
-                    let w = f.read_u8()? as u16;
-                    let wh = f.read_u16::<BigEndian>()?;
-
-                    let upper_left_s = (s << 4) + (st >> 12);
-                    let upper_left_t = st & 0x0FFF;
-                    let width = ((w << 4) + (wh >> 12)) / 4 + 1;
-                    let height = (wh & 0x0FFF) / 4 + 1;
-
-                    F3dex::SetTileSize { upper_left_s, upper_left_t, descriptor, width, height }
-                },
-                0xF3 => {
-                    let s = f.read_u8()? as u16;
-                    let st = f.read_u16::<BigEndian>()?;
-                    let descriptor = f.read_u8()?;
-                    let t = f.read_u8()? as u16;
-                    let td = f.read_u16::<BigEndian>()?;
-
-                    let upper_left_s = (s << 4) + (st >> 12);
-                    let upper_left_t = st & 0x0FFF;
-                    let texels_count = (t << 4) + (td >> 12);
-                    let dxt = td & 0x0FFF;
-
-                    F3dex::LoadBlock { upper_left_s, upper_left_t, descriptor, texels_count, dxt }
-                },
-                0xF4 => {
-                    let s = f.read_u8()? as u16;
-                    let st = f.read_u16::<BigEndian>()?;
-                    let descriptor = f.read_u8()?;
-                    let w = f.read_u8()? as u16;
-                    let wh = f.read_u16::<BigEndian>()?;
-
-                    let upper_left_s = (s << 4) + (st >> 12);
-                    let upper_left_t = st & 0x0FFF;
-                    let lower_right_s = ((w << 4) + (wh >> 12)) / 4 + 1;
-                    let lower_right_t = (wh & 0x0FFF) / 4 + 1;
-
-                    F3dex::LoadTile { upper_left_s, upper_left_t, descriptor, lower_right_s, lower_right_t }
-                },
-                0xF5 => {
-                    let b1 = f.read_u8()?;
-                    let b2 = f.read_u8()?;
-                    let b3 = f.read_u8()?;
-                    let b4 = f.read_u8()?;
-                    let b5 = f.read_u8()?;
-                    let b6 = f.read_u8()?;
-                    let b7 = f.read_u8()?;
-
-                    let format = match b1 >> 5 {
-                        0 => ColourFormat::Rgba,
-                        1 => ColourFormat::Yuv,
-                        2 => ColourFormat::Palette,
-                        3 => ColourFormat::GrayscaleAlpha,
-                        4 => ColourFormat::Grayscale,
-                        _ => panic!("Unknown texture format."),
-                    };
-                    let depth = 4 * 2u8.pow(((b1 >> 3) & 0b11) as u32);
-                    let values_per_row = (((b1 & 0b11) << 7) as u16) + ((b2 >> 1) as u16);
-                    let tmem_offset = (((b2 & 0b1) as u16) << 8) + (b3 as u16);
-                    let descriptor = b4; assert_eq!(b4 & 0xF8, 0);
-                    let palette = b5 >> 4;
-                    let clamp_mirror_y = (b5 >> 2) & 0b11;
-                    let unwrapped_y = ((b5 << 2) + (b6 >> 6)) & 0b1111;
-                    let perspective_div_y = (b6 >> 2) & 0b1111;
-                    let clamp_mirror_x = b6 & 0b11;
-                    let unwrapped_x = b7 >> 4;
-                    let perspective_div_x = b7 & 0b1111;
-
-                    F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
-                        palette, clamp_mirror: Vector2 {
-                            x: clamp_mirror_x, y: clamp_mirror_y,
-                        }, unwrapped: Vector2 {
-                            x: unwrapped_x, y: unwrapped_y,
-                        }, perspective_div: Vector2 {
-                            x: perspective_div_x, y: perspective_div_y,
-                        }
-                    }
-                },
-                0xFC => {
-                    let unk1 = f.read_u8()?;
-                    let unk2 = f.read_u16::<BigEndian>()?;
-                    let unk3 = f.read_u32::<BigEndian>()?;
-
-                    // [aaaa] [ccccc] [eee] [ggg] [iiii] [kkkkk] [bbbb] [jjjj] [mmm] [ooo] [ddd] [fff] [hhh] [lll] [nnn] [ppp]
-
-                    F3dex::SetCombine { unk1, unk2, unk3 }
-                },
-                0xFD => {
-                    let flags = f.read_u8()?;
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                    let unk = f.read_u8()?;
-                    let address = f.read_u32::<BigEndian>()?;
-
-                    let format = match flags >> 5 {
-                        0 => ColourFormat::Rgba,
-                        1 => ColourFormat::Yuv,
-                        2 => ColourFormat::Palette,
-                        3 => ColourFormat::GrayscaleAlpha,
-                        4 => ColourFormat::Grayscale,
-                        _ => panic!("Unknown texture format."),
-                    };
-
-                    let depth = 4 * 2u8.pow(((flags >> 3) & 0b11) as u32);
-
-                    F3dex::SettImg { format, depth, address, unk }
-                },
-                _ => panic!("Unknown F3DEX command 0x{:X}", cmd),
-            };
-
+            let command = read_command(&mut f)?;
             commands.push(command);
         }
 
@@ -1333,9 +1086,15 @@ impl Model {
         f.write_f32::<BigEndian>(self.unk34)?;
 
         let texture_setup_offset = f.seek(SeekFrom::Current(0))? as u16;
-        let textures_count = self.textures.len() as u32;
-        f.write_u32::<BigEndian>(textures_count)?; // bytes count
-        f.write_u16::<BigEndian>(vertices_count)?;
+        let textures_count = self.textures.len() as u16;
+
+        let mut bytes_count = 0;
+        for tex in &self.textures {
+            bytes_count += tex.size;
+        }
+
+        f.write_u32::<BigEndian>(bytes_count)?;
+        f.write_u16::<BigEndian>(textures_count)?;
         f.write_u16::<BigEndian>(0)?;
 
         let mut offset = 0;
@@ -1368,7 +1127,7 @@ impl Model {
         f.write_u32::<BigEndian>(self.unk_display_list)?;
 
         for cmd in &self.commands {
-            // TODO
+            write_command(&mut f, &cmd)?;
         }
 
         let vertex_store_setup_offset = f.seek(SeekFrom::Current(0))? as u32;
@@ -1580,24 +1339,20 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let unk2 = f.read_u16::<BigEndian>()?;
             let unk3 = read_3_floats(f);
 
-            Geometry::Unknown0x00 { len: 0 }
+            Geometry::Unknown0x00 { len, unk1, unk2, unk3 }
         },
         0x1 => {
             let size = f.read_u32::<BigEndian>()?;
-            let x1 = f.read_f32::<BigEndian>()?;
-            let y1 = f.read_f32::<BigEndian>()?;
-            let z1 = f.read_f32::<BigEndian>()?;
-            let x2 = f.read_f32::<BigEndian>()?;
-            let y2 = f.read_f32::<BigEndian>()?;
-            let z2 = f.read_f32::<BigEndian>()?;
+            let pos1 = read_3_floats(f);
+            let pos2 = read_3_floats(f);
             let draw_only_nearest = f.read_u16::<BigEndian>()? > 0;
-            let offset2 = f.read_u16::<BigEndian>()?;
-            let len = f.read_u32::<BigEndian>()?;
+            let unk1 = f.read_u16::<BigEndian>()?;
+            let unk2 = f.read_u32::<BigEndian>()?;
 
-            Geometry::Sort { x1, y1, z1, x2, y2, z2, draw_only_nearest, offset2, len }
+            Geometry::Sort { pos1, pos2, draw_only_nearest, unk1, unk2 }
         },
         0x2 => {
-            let address = f.read_u32::<BigEndian>()? as u16;
+            let address = f.read_u32::<BigEndian>()?;
             let len = f.read_u8()?;
             let id = f.read_u8()?;
             let unk = f.read_u16::<BigEndian>()?;
@@ -1630,7 +1385,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
                 }
             }
 
-            Geometry::Skinning
+            Geometry::Skinning // TODO
         },
         0x8 => {
             let layout_offset = f.read_u32::<BigEndian>()?;
@@ -1645,11 +1400,9 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let len = f.read_u32::<BigEndian>()?;
             let index = f.read_u16::<BigEndian>()?;
             let bone = f.read_u16::<BigEndian>()?;
-            let x = f.read_f32::<BigEndian>()?;
-            let y = f.read_f32::<BigEndian>()?;
-            let z = f.read_f32::<BigEndian>()?;
+            let pos = read_3_floats(f);
 
-            Geometry::ReferencePoint { index, bone, x, y, z }
+            Geometry::ReferencePoint { len, index, bone, pos }
         },
         0xC => {
             let len = f.read_u32::<BigEndian>()?;
@@ -1665,16 +1418,20 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
 
             // there are no good way to detect that data so
             // looking for the next command is done for now
+            let mut garbage = vec![];
             let mut last_word_read = f.read_u32::<BigEndian>()?;
             while last_word_read != 2 && last_word_read != 3 {
+                garbage.push(last_word_read);
                 last_word_read = f.read_u32::<BigEndian>()?;
             }
 
             f.seek(SeekFrom::Current(-4))?;
 
             let mut commands = vec![];
+            // can have sub commands
+            // TODO
 
-            Geometry::Selector { selector, indices, commands }
+            Geometry::Selector { selector, indices, commands, garbage }
         },
         0xD => {
             let unk1 = f.read_u32::<BigEndian>()?;
@@ -1683,11 +1440,12 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let len = f.read_u16::<BigEndian>()?;
             let unk2 = f.read_u16::<BigEndian>()?;
 
+            let mut commands = vec![];
             if unk1 == 0x28 {
-                read_geometry_layout_command(f)?;
+                commands.push(read_geometry_layout_command(f)?);
             }
 
-            Geometry::DrawDistance { len, min, max, unk1, unk2 }
+            Geometry::DrawDistance { len, min, max, unk1, unk2, commands }
         },
         0xE => {
             let len = f.read_u32::<BigEndian>()?;
@@ -1695,13 +1453,15 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let vec2 = read_3_i16(f);
             let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
 
+            let mut commands = vec![];
             let mut curr = f.seek(SeekFrom::Current(0))?;
             while curr < offset + (len as u64) {
-                let command = read_geometry_layout_command(f);
+                let command = read_geometry_layout_command(f)?;
+                commands.push(command);
                 curr = f.seek(SeekFrom::Current(0))?;
             }
 
-            Geometry::Unknown0x0e
+            Geometry::Unknown0x0e { len, vec1, vec2, commands }
         },
         0xF => {
             let len = f.read_u32::<BigEndian>()?;
@@ -1712,6 +1472,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let unk = f.read_u8()?;
             for _ in 12..header_size {
                 let unk = f.read_u8()?;
+                header.push(unk);
             }
 
             let mut commands = vec![];
@@ -1722,7 +1483,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
                 }
             }
 
-            Geometry::Group0x0f { header, commands }
+            Geometry::Group0x0f { len, header, commands }
         },
         0x10 => {
             let len = f.read_u32::<BigEndian>()?;
@@ -1755,6 +1516,124 @@ fn read_geometry_layout(f: &mut File) -> std::io::Result<Vec<Geometry>> {
     Ok(geometry)
 }
 
+fn write_geometry_layout_command(f: &mut File, geocmd: &Geometry) -> std::io::Result<()> {
+    match geocmd {
+        Geometry::Unknown0x00 { len, unk1, unk2, unk3 } => {
+            f.write_u32::<BigEndian>(0x0)?;
+            f.write_u32::<BigEndian>(*len)?;
+            f.write_u16::<BigEndian>(*unk1)?;
+            f.write_u16::<BigEndian>(*unk2)?;
+            write_3_floats(f, unk3);
+        },
+        Geometry::Sort { pos1, pos2, draw_only_nearest, unk1, unk2 } => {
+            f.write_u32::<BigEndian>(0x1)?;
+            write_3_floats(f, pos1);
+            write_3_floats(f, pos2);
+            f.write_u16::<BigEndian>(if *draw_only_nearest { 1 } else { 0 })?;
+            f.write_u16::<BigEndian>(*unk1)?;
+            f.write_u32::<BigEndian>(*unk2)?;
+        },
+        Geometry::Bone { address, len, id, unk } => {
+            f.write_u32::<BigEndian>(0x2)?;
+            f.write_u32::<BigEndian>(*address)?;
+            f.write_u8(*len)?;
+            f.write_u8(*id)?;
+            f.write_u16::<BigEndian>(*unk)?;
+        },
+        Geometry::LoadDisplayList { len, offset, tri_count } => {
+            f.write_u32::<BigEndian>(0x3)?;
+            f.write_u32::<BigEndian>(*len)?;
+            f.write_u16::<BigEndian>(*offset)?;
+            f.write_u16::<BigEndian>(*tri_count)?;
+            f.write_u32::<BigEndian>(0)?;
+        },
+        Geometry::Skinning => {
+            // TODO
+            f.write_u32::<BigEndian>(0x5)?;
+            for _ in 0..8 {
+                f.write_u16::<BigEndian>(0)?;
+            }
+        },
+        Geometry::Lod { layout_offset, max_dist, min_dist, test } => {
+            f.write_u32::<BigEndian>(0x8)?;
+            f.write_u32::<BigEndian>(*layout_offset)?;
+            f.write_f32::<BigEndian>(*max_dist)?;
+            f.write_f32::<BigEndian>(*min_dist)?;
+            write_3_floats(f, test);
+            f.write_u32::<BigEndian>(0x20)?;
+        },
+        Geometry::ReferencePoint { len, index, bone, pos } => {
+            f.write_u32::<BigEndian>(0xA)?;
+            f.write_u32::<BigEndian>(*len)?;
+            f.write_u16::<BigEndian>(*index)?;
+            f.write_u16::<BigEndian>(*bone)?;
+            write_3_floats(f, pos);
+        },
+        Geometry::Selector { selector, indices, commands, garbage } => {
+            f.write_u32::<BigEndian>(0xC)?;
+            f.write_u32::<BigEndian>(0)?;
+            f.write_u16::<BigEndian>(indices.len() as u16)?;
+            for i in indices {
+                f.write_i32::<BigEndian>(*i)?;
+            }
+
+            for g in garbage {
+                f.write_u32::<BigEndian>(*g)?;
+            }
+
+            for cmd in commands {
+                write_geometry_layout_command(f, cmd)?;
+            }
+        },
+        Geometry::DrawDistance { len, min, max, unk1, unk2, commands } => {
+            f.write_u32::<BigEndian>(0xD)?;
+            f.write_u32::<BigEndian>(*unk1)?;
+            write_3_i16(f, min);
+            write_3_i16(f, max);
+            f.write_u16::<BigEndian>(*len)?;
+            f.write_u16::<BigEndian>(*unk2)?;
+
+            for cmd in commands {
+                write_geometry_layout_command(f, cmd)?;
+            }
+        },
+        Geometry::Unknown0x0e { len, vec1, vec2, commands } => {
+            f.write_u32::<BigEndian>(0xE)?;
+            f.write_u32::<BigEndian>(*len)?;
+            write_3_i16(f, vec1);
+            write_3_i16(f, vec2);
+            f.write_u32::<BigEndian>(0)?;
+
+            for cmd in commands {
+                write_geometry_layout_command(f, cmd)?;
+            }
+        },
+        Geometry::Group0x0f { len, header, commands } => {
+            f.write_u32::<BigEndian>(0xF)?;
+            f.write_u32::<BigEndian>(*len)?;
+            f.write_u16::<BigEndian>(header.len() as u16 + 12)?;
+            for b in header {
+                f.write_u8(*b)?;
+            }
+            
+            for cmd in commands {
+                write_geometry_layout_command(f, cmd)?;
+            }
+        },
+        _ => {},
+    };
+
+    Ok(())
+}
+
+fn write_geometry_layout(f: &mut File, geocmds: &Vec<Geometry>) -> std::io::Result<()> {
+    for geocmd in geocmds {
+        write_geometry_layout_command(f, geocmd)?;
+    }
+
+    Ok(())
+}
+
 fn read_align_8bytes(f: &mut File) {
     let alignment = 8 - (f.seek(SeekFrom::Current(0)).unwrap() % 8);
     if alignment < 8 {
@@ -1771,4 +1650,429 @@ fn write_align_8bytes(f: &mut File) {
             f.write_u8(0).unwrap();
         }
     }
+}
+
+fn read_command(f: &mut File) -> std::io::Result<F3dex> {
+    let cmd = f.read_u8()?;
+    let command = match cmd {
+        0x00 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            
+            F3dex::SPNoOp
+        },
+        0x04 => {
+            let index = (f.read_u8()? as u16) * 2;
+            let data = f.read_u16::<BigEndian>()?;
+            let address = f.read_u32::<BigEndian>()?;
+
+            let count = (data >> 10) as u8;
+            let size = data & 0x3FF;
+            assert_eq!((count as u16) * 0x10 - 1, size);
+
+            F3dex::Vertex { index, count, address }
+        },
+        0x06 => {
+            let store_ra = f.read_u8()? != 0;
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let address = f.read_u32::<BigEndian>()?;
+
+            F3dex::DisplayList { store_ra, address }
+        },
+        0xB1 => {
+            let v1 = f.read_u8()? / 2;
+            let v2 = f.read_u8()? / 2;
+            let v3 = f.read_u8()? / 2;
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let v4 = f.read_u8()? / 2;
+            let v5 = f.read_u8()? / 2;
+            let v6 = f.read_u8()? / 2;
+
+            F3dex::Triangle2 { v1, v2, v3, v4, v5, v6 }
+        },
+        0xB6 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let flags = f.read_u32::<BigEndian>()?;
+
+            F3dex::ClearGeometryMode(flags)
+        },
+        0xB7 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let flags = f.read_u32::<BigEndian>()?;
+
+            F3dex::SetGeometryMode(flags)
+        },
+        0xB8 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+
+            F3dex::EndDisplayList
+        },
+        0xB9 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let amount = f.read_u8()?;
+            let count = f.read_u8()?;
+            let mode = f.read_u32::<BigEndian>()?;
+
+            // TODO
+            F3dex::SetOtherModeL { amount, count, mode }
+        },
+        0xBA => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let amount = f.read_u8()?;
+            let count = f.read_u8()?;
+            let mode = f.read_u32::<BigEndian>()?;
+
+            // TODO
+            F3dex::SetOtherModeH { amount, count, mode }
+        },
+        0xBB => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let flags = f.read_u8()?;
+            let enable = f.read_u8()? != 0;
+            let frac_x = f.read_u16::<BigEndian>()?;
+            let frac_y = f.read_u16::<BigEndian>()?;
+
+            let mipmaps = flags >> 3;
+            let descriptor = flags & 0b111;
+            let scalex = (frac_x as f32) / (0xFFFF as f32);
+            let scaley = (frac_y as f32) / (0xFFFF as f32);
+
+            F3dex::Texture { mipmaps, descriptor, enable, scalex, scaley }
+        },
+        0xBD => {
+            let unk1 = f.read_u8()?;
+            let unk2 = f.read_u8()?;
+            let unk3 = f.read_u8()?;
+            let count = f.read_u32::<BigEndian>()?;
+
+            F3dex::PopMatrix { unk1, unk2, unk3, count }
+        },
+        0xBF => {
+            let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            let v1 = f.read_u8()? / 2;
+            let v2 = f.read_u8()? / 2;
+            let v3 = f.read_u8()? / 2;
+
+            F3dex::Triangle1 { v1, v2, v3 }
+        },
+        0xE6 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            
+            F3dex::RdpLoadSync
+        },
+        0xE7 => {
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
+            let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
+            
+            F3dex::RdpPipeSync
+        },
+        0xF0 => {
+            let descriptor = f.read_u32::<BigEndian>()?; assert_eq!(descriptor & 0xFFFFFFF0, 0);
+            let colour_count = f.read_u16::<BigEndian>()?;
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+
+            let descriptor = descriptor as u8;
+            let colour_count = (((colour_count >> 4) - 1) & 0x3FF) * 4;
+
+            F3dex::LoadTlut { descriptor, colour_count }
+        },
+        0xF2 => {
+            let s = f.read_u8()? as u16;
+            let st = f.read_u16::<BigEndian>()?;
+            let descriptor = f.read_u8()?;
+            let w = f.read_u8()? as u16;
+            let wh = f.read_u16::<BigEndian>()?;
+
+            let upper_left_s = (s << 4) + (st >> 12);
+            let upper_left_t = st & 0x0FFF;
+            let width = ((w << 4) + (wh >> 12)) / 4 + 1;
+            let height = (wh & 0x0FFF) / 4 + 1;
+
+            F3dex::SetTileSize { upper_left_s, upper_left_t, descriptor, width, height }
+        },
+        0xF3 => {
+            let s = f.read_u8()? as u16;
+            let st = f.read_u16::<BigEndian>()?;
+            let descriptor = f.read_u8()?;
+            let t = f.read_u8()? as u16;
+            let td = f.read_u16::<BigEndian>()?;
+
+            let upper_left_s = (s << 4) + (st >> 12);
+            let upper_left_t = st & 0x0FFF;
+            let texels_count = (t << 4) + (td >> 12);
+            let dxt = td & 0x0FFF;
+
+            F3dex::LoadBlock { upper_left_s, upper_left_t, descriptor, texels_count, dxt }
+        },
+        0xF4 => {
+            let s = f.read_u8()? as u16;
+            let st = f.read_u16::<BigEndian>()?;
+            let descriptor = f.read_u8()?;
+            let w = f.read_u8()? as u16;
+            let wh = f.read_u16::<BigEndian>()?;
+
+            let upper_left_s = (s << 4) + (st >> 12);
+            let upper_left_t = st & 0x0FFF;
+            let lower_right_s = ((w << 4) + (wh >> 12)) / 4 + 1;
+            let lower_right_t = (wh & 0x0FFF) / 4 + 1;
+
+            F3dex::LoadTile { upper_left_s, upper_left_t, descriptor, lower_right_s, lower_right_t }
+        },
+        0xF5 => {
+            let b1 = f.read_u8()?;
+            let b2 = f.read_u8()?;
+            let b3 = f.read_u8()?;
+            let b4 = f.read_u8()?;
+            let b5 = f.read_u8()?;
+            let b6 = f.read_u8()?;
+            let b7 = f.read_u8()?;
+
+            let format = match b1 >> 5 {
+                0 => ColourFormat::Rgba,
+                1 => ColourFormat::Yuv,
+                2 => ColourFormat::Palette,
+                3 => ColourFormat::GrayscaleAlpha,
+                4 => ColourFormat::Grayscale,
+                _ => panic!("Unknown texture format."),
+            };
+            let depth = 4 * 2u8.pow(((b1 >> 3) & 0b11) as u32);
+            let values_per_row = (((b1 & 0b11) << 7) as u16) + ((b2 >> 1) as u16);
+            let tmem_offset = (((b2 & 0b1) as u16) << 8) + (b3 as u16);
+            let descriptor = b4; assert_eq!(b4 & 0xF8, 0);
+            let palette = b5 >> 4;
+            let clamp_mirror_y = (b5 >> 2) & 0b11;
+            let unwrapped_y = ((b5 << 2) + (b6 >> 6)) & 0b1111;
+            let perspective_div_y = (b6 >> 2) & 0b1111;
+            let clamp_mirror_x = b6 & 0b11;
+            let unwrapped_x = b7 >> 4;
+            let perspective_div_x = b7 & 0b1111;
+
+            F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
+                palette, clamp_mirror: Vector2 {
+                    x: clamp_mirror_x, y: clamp_mirror_y,
+                }, unwrapped: Vector2 {
+                    x: unwrapped_x, y: unwrapped_y,
+                }, perspective_div: Vector2 {
+                    x: perspective_div_x, y: perspective_div_y,
+                }
+            }
+        },
+        0xFC => {
+            let unk1 = f.read_u8()?;
+            let unk2 = f.read_u16::<BigEndian>()?;
+            let unk3 = f.read_u32::<BigEndian>()?;
+
+            // [aaaa] [ccccc] [eee] [ggg] [iiii] [kkkkk] [bbbb] [jjjj] [mmm] [ooo] [ddd] [fff] [hhh] [lll] [nnn] [ppp]
+
+            F3dex::SetCombine { unk1, unk2, unk3 }
+        },
+        0xFD => {
+            let flags = f.read_u8()?;
+            let padding = f.read_u8()?; assert_eq!(padding, 0);
+            let unk = f.read_u8()?;
+            let address = f.read_u32::<BigEndian>()?;
+
+            let format = match flags >> 5 {
+                0 => ColourFormat::Rgba,
+                1 => ColourFormat::Yuv,
+                2 => ColourFormat::Palette,
+                3 => ColourFormat::GrayscaleAlpha,
+                4 => ColourFormat::Grayscale,
+                _ => panic!("Unknown texture format."),
+            };
+
+            let depth = 4 * 2u8.pow(((flags >> 3) & 0b11) as u32);
+
+            F3dex::SettImg { format, depth, address, unk }
+        },
+        _ => panic!("Unknown F3DEX command 0x{:X}", cmd),
+    };
+
+    Ok(command)
+}
+
+fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
+    match cmd {
+        F3dex::SPNoOp => {
+            f.write_u64::<BigEndian>(0)?;
+        },
+        F3dex::Vertex { index, count, address } => {
+            let count = (*count) as u16;
+            let size = count * 0x10 - 1;
+            let data = (count << 10) + size;
+
+            f.write_u8(0x04)?;
+            f.write_u8((index / 2) as u8)?;
+            f.write_u16::<BigEndian>(0)?;
+            f.write_u32::<BigEndian>(*address)?;
+        },
+        F3dex::DisplayList { store_ra, address } => {
+            f.write_u8(0x06)?;
+            f.write_u8(if *store_ra { 1 } else { 0 })?;
+            f.write_u16::<BigEndian>(0)?;
+            f.write_u32::<BigEndian>(*address)?;
+        },
+        F3dex::Triangle2 { v1, v2, v3, v4, v5, v6 } => {
+            f.write_u8(0xB1)?;
+            f.write_u8(*v1 * 2)?;
+            f.write_u8(*v2 * 2)?;
+            f.write_u8(*v3 * 2)?;
+            f.write_u8(0)?;
+            f.write_u8(*v4 * 2)?;
+            f.write_u8(*v5 * 2)?;
+            f.write_u8(*v6 * 2)?;
+        },
+        F3dex::ClearGeometryMode(flags) => {
+            f.write_u32::<BigEndian>(0xB6000000)?;
+            f.write_u32::<BigEndian>(*flags)?;
+        },
+        F3dex::SetGeometryMode(flags) => {
+            f.write_u32::<BigEndian>(0xB7000000)?;
+            f.write_u32::<BigEndian>(*flags)?;
+        },
+        F3dex::EndDisplayList => {
+            f.write_u32::<BigEndian>(0xB8000000)?;
+            f.write_u32::<BigEndian>(0)?;
+        },
+        F3dex::SetOtherModeL { amount, count, mode } => {
+            f.write_u16::<BigEndian>(0xB900)?;
+            f.write_u8(*amount)?;
+            f.write_u8(*count)?;
+            f.write_u32::<BigEndian>(*mode)?;
+        },
+        F3dex::SetOtherModeH { amount, count, mode } => {
+            f.write_u16::<BigEndian>(0xBA00)?;
+            f.write_u8(*amount)?;
+            f.write_u8(*count)?;
+            f.write_u32::<BigEndian>(*mode)?;
+        },
+        F3dex::Texture { mipmaps, descriptor, enable, scalex, scaley } => {
+            let flags = (mipmaps << 3) + descriptor;
+            let frac_x = (*scalex * 65535.0) as u16;
+            let frac_y = (*scaley * 65535.0) as u16;
+
+            f.write_u16::<BigEndian>(0xBB00)?;
+            f.write_u8(flags)?;
+            f.write_u8(if *enable { 1 } else { 0 })?;
+            f.write_u16::<BigEndian>(frac_x)?;
+            f.write_u16::<BigEndian>(frac_y)?;
+        },
+        F3dex::PopMatrix { unk1, unk2, unk3, count } => {
+            f.write_u8(0xBD)?;
+            f.write_u8(*unk1)?;
+            f.write_u8(*unk2)?;
+            f.write_u8(*unk3)?;
+            f.write_u32::<BigEndian>(*count)?;
+        },
+        F3dex::Triangle1 { v1, v2, v3 } => {
+            f.write_u8(0xBF)?;
+            f.write_u32::<BigEndian>(0)?;
+            f.write_u8(*v1 * 2)?;
+            f.write_u8(*v2 * 2)?;
+            f.write_u8(*v3 * 2)?;
+        },
+        F3dex::RdpLoadSync => {
+            f.write_u32::<BigEndian>(0xE6000000)?;
+            f.write_u32::<BigEndian>(0)?;
+        },
+        F3dex::RdpPipeSync => {
+            f.write_u32::<BigEndian>(0xE7000000)?;
+            f.write_u32::<BigEndian>(0)?;
+        },
+        F3dex::LoadTlut { descriptor, colour_count } => {
+            let colour_count = ((*colour_count / 4) + 1) << 4;
+
+            f.write_u8(0xF0)?;
+            f.write_u32::<BigEndian>(*descriptor as u32)?;
+            f.write_u16::<BigEndian>(colour_count)?;
+            f.write_u8(0)?;
+        },
+        F3dex::SetTileSize { upper_left_s, upper_left_t, descriptor, width, height } => {
+            let s = (*upper_left_s >> 4) as u8;
+            let st = (*upper_left_s << 12) + *upper_left_t;
+            let width = (*width - 1) * 4; 
+            let height = (*height - 1) * 4;
+            let w = (width >> 4) as u8;
+            let wh = (width << 12) + height;
+
+            f.write_u8(0xF2)?;
+            f.write_u8(s)?;
+            f.write_u16::<BigEndian>(st)?;
+            f.write_u8(*descriptor)?;
+            f.write_u8(w)?;
+            f.write_u16::<BigEndian>(wh)?;
+        },
+        F3dex::LoadBlock { upper_left_s, upper_left_t, descriptor, texels_count, dxt } => {
+            let s = (*upper_left_s >> 4) as u8;
+            let st = (*upper_left_s << 12) + *upper_left_t;
+            let texels_count = (*texels_count - 1) * 4; 
+            let dxt = (*dxt - 1) * 4;
+            let t = (texels_count >> 4) as u8;
+            let td = (dxt << 12) + texels_count;
+
+            f.write_u8(0xF3)?;
+            f.write_u8(s)?;
+            f.write_u16::<BigEndian>(st)?;
+            f.write_u8(*descriptor)?;
+            f.write_u8(t)?;
+            f.write_u16::<BigEndian>(td)?;
+        },
+        F3dex::LoadTile { upper_left_s, upper_left_t, descriptor, lower_right_s, lower_right_t } => {
+            let s = (*upper_left_s >> 4) as u8;
+            let st = (*upper_left_s << 12) + *upper_left_t;
+            let lower_right_s = (*lower_right_s - 1) * 4; 
+            let lower_right_t = (*lower_right_t - 1) * 4;
+            let w = (lower_right_s >> 4) as u8;
+            let wh = (lower_right_s << 12) + lower_right_t;
+
+            f.write_u8(0xF4)?;
+            f.write_u8(s)?;
+            f.write_u16::<BigEndian>(st)?;
+            f.write_u8(*descriptor)?;
+            f.write_u8(w)?;
+            f.write_u16::<BigEndian>(wh)?;
+        },
+        F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
+                palette, clamp_mirror, unwrapped, perspective_div } => {
+            // TODO
+            f.write_u64::<BigEndian>(0xF5 << 56)?
+        },
+        F3dex::SetCombine { unk1, unk2, unk3 } => {
+            f.write_u8(0xFC)?;
+
+            // TODO
+            f.write_u8(*unk1)?;
+            f.write_u16::<BigEndian>(*unk2)?;
+            f.write_u32::<BigEndian>(*unk3)?;
+        },
+        F3dex::SettImg { format, depth, address, unk } => {
+            let format = match *format {
+                ColourFormat::Rgba => 0,
+                ColourFormat::Yuv => 1,
+                ColourFormat::Palette => 2,
+                ColourFormat::GrayscaleAlpha => 3,
+                ColourFormat::Grayscale => 4,
+            };
+            let depth = (*depth / 4).trailing_zeros() as u8;
+            let flags = (format << 5) + (depth << 3);
+
+            f.write_u8(0xFD)?;
+            f.write_u8(flags)?;
+            f.write_u8(0)?;
+            f.write_u8(*unk)?;
+            f.write_u32::<BigEndian>(*address)?;
+        },
+    };
+
+    Ok(())
 }
