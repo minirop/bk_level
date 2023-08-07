@@ -23,7 +23,7 @@ use std::io::Write;
 pub struct Model {
     textures: Vec<Texture>,
     commands: Vec<F3dex>,
-    vertices: Vec<Vertex>,
+    vertex_data: VertexData,
     collisions: Collisions,
     geometry: Vec<Geometry>,
     unk14: ModelUnk14,
@@ -34,8 +34,6 @@ pub struct Model {
     unk30: u16,
     unk34: f32,
     unk_display_list: u32,
-    coord_range: Vector2<i16>,
-    coll_range: Vector2<i16>,
     animations: AnimationList,
     animated_textures: Vec<Frame>,
 }
@@ -78,6 +76,23 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    fn new() -> Self {
+        Default::default()
+    }
+}
+
+
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VertexData {
+    min_coord: Vector3<i16>,
+    max_coord: Vector3<i16>,
+    centre_coord: Vector3<i16>,
+    local_norm: i16,
+    global_norm: i16,
+    vertices: Vec<Vertex>,
+}
+
+impl VertexData {
     fn new() -> Self {
         Default::default()
     }
@@ -721,10 +736,7 @@ impl Model {
         let unk28 = f.read_u32::<BigEndian>()?;
         let animated_textures_offset = f.read_u32::<BigEndian>()?;
 
-        // order not sure
         println!("===============================");
-        println!("unk20 {:#X}", unk20);
-
         println!("texture_setup_offset {:#X}", texture_setup_offset);
         println!("display_list_setup_offset {:#X}", display_list_setup_offset);
         println!("vertex_store_setup_offset {:#X}", vertex_store_setup_offset);
@@ -733,6 +745,7 @@ impl Model {
         println!("effects_setup {:#X}", effects_setup);
         println!("unk28 {:#X}", unk28);
         println!("animation_setup {:#X}", animation_setup);
+        println!("unk20 {:#X}", unk20); // order not sure
         println!("animated_textures_offset {:#X}", animated_textures_offset);
         println!("geometry_offset {:#X}", geometry_offset);
         println!("===============================");
@@ -1051,22 +1064,17 @@ impl Model {
         assert!(vertex_store_setup_offset != 0);
         assert_eq!(vertex_store_setup_offset as u64, f.seek(SeekFrom::Current(0))?);
 
-        let neg_x = f.read_i16::<BigEndian>()?;
-        let neg_y = f.read_i16::<BigEndian>()?;
-        let neg_z = f.read_i16::<BigEndian>()?;
-        let pos_x = f.read_i16::<BigEndian>()?;
-        let pos_y = f.read_i16::<BigEndian>()?;
-        let pos_z = f.read_i16::<BigEndian>()?;
-
-        let coord_range = read_2_i16(&mut f);
-        let coll_range = read_2_i16(&mut f);
+        let min_coord = read_3_i16(&mut f);
+        let max_coord = read_3_i16(&mut f);
+        let centre_coord = read_3_i16(&mut f);
+        let local_norm = f.read_i16::<BigEndian>()?;
 
         let vertices_count_2 = f.read_u16::<BigEndian>()?;
         assert_eq!(vertices_count, vertices_count_2);
 
-        let unk_vertices = f.read_u16::<BigEndian>()?;
+        let global_norm = f.read_i16::<BigEndian>()?;
 
-        let mut vertices: Vec<Vertex> = vec![];
+        let mut vertices = vec![];
         for _ in 0..vertices_count {
             let mut vertex = Vertex::new();
 
@@ -1083,6 +1091,10 @@ impl Model {
 
             vertices.push(vertex);
         }
+
+        let vertex_data = VertexData {
+            min_coord, max_coord, centre_coord, local_norm, global_norm, vertices
+        };
 
         let mut unk14 = ModelUnk14::new();
 
@@ -1267,7 +1279,6 @@ impl Model {
             }
         }
 
-        // before or after unk20?
         let mut animations = AnimationList::new();
         if animation_setup > 0 {
             assert_eq!(animation_setup as u64, f.seek(SeekFrom::Current(0))?);
@@ -1287,6 +1298,8 @@ impl Model {
             }
         }
 
+        // not sure about unk20's position. There are no files in BK that
+        // have unk20 AND animation_setup or unk28
         let mut unknown20 = Unknown20List::new();
         if unk20 > 0 {
             assert_eq!(unk20 as u64, f.seek(SeekFrom::Current(0))?);
@@ -1333,7 +1346,6 @@ impl Model {
         Ok(Self {
             textures,
             commands,
-            vertices,
             collisions,
             geometry,
             unk14,
@@ -1344,8 +1356,7 @@ impl Model {
             unk30,
             unk34,
             unk_display_list,
-            coord_range,
-            coll_range,
+            vertex_data,
             animations,
             animated_textures,
         })
