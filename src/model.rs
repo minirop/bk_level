@@ -1088,7 +1088,7 @@ impl Model {
         let texture_setup_offset = f.seek(SeekFrom::Current(0))? as u16;
         let textures_count = self.textures.len() as u16;
 
-        let mut bytes_count = 0;
+        let mut bytes_count = 8 + self.textures.len() as u32 * 16;
         for tex in &self.textures {
             bytes_count += tex.size;
         }
@@ -1297,7 +1297,9 @@ impl Model {
         }
 
         let geometry_offset = f.seek(SeekFrom::Current(0))? as u32;
-        // TODO
+        write_geometry_layout(&mut f, &self.geometry)?;
+
+        let final_len = f.seek(SeekFrom::Current(0))?;
 
         // update header pointers
         f.seek(SeekFrom::Start(4))?;
@@ -1313,6 +1315,8 @@ impl Model {
         f.write_u32::<BigEndian>(effects_setup)?;
         f.write_u32::<BigEndian>(unk28_offset)?;
         f.write_u32::<BigEndian>(animated_textures_offset)?;
+
+        f.set_len(final_len - 4)?;
 
         Ok(())
     }
@@ -1468,9 +1472,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
 
             let mut header = vec![];
             let header_size = f.read_i16::<BigEndian>()?;
-            let count = f.read_u8()?;
-            let unk = f.read_u8()?;
-            for _ in 12..header_size {
+            for _ in 10..header_size {
                 let unk = f.read_u8()?;
                 header.push(unk);
             }
