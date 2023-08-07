@@ -80,8 +80,25 @@ pub fn write_3_floats(f: &mut File, vec: &Vector3<f32>) {
     f.write_f32::<BigEndian>(vec.z).unwrap();
 }
 
+pub fn write_3_i16(f: &mut File, vec: &Vector3<i16>) {
+    f.write_i16::<BigEndian>(vec.x).unwrap();
+    f.write_i16::<BigEndian>(vec.y).unwrap();
+    f.write_i16::<BigEndian>(vec.z).unwrap();
+}
+
+pub fn write_2_i16(f: &mut File, vec: &Vector2<i16>) {
+    f.write_i16::<BigEndian>(vec.x).unwrap();
+    f.write_i16::<BigEndian>(vec.y).unwrap();
+}
+
 pub fn write_3_u32(f: &mut File, vec: &Vector3<u32>) {
     f.write_u32::<BigEndian>(vec.x).unwrap();
     f.write_u32::<BigEndian>(vec.y).unwrap();
     f.write_u32::<BigEndian>(vec.z).unwrap();
+}
+
+pub fn write_3_u8(f: &mut File, vec: &Vector3<u8>) {
+    f.write_u8(vec.x).unwrap();
+    f.write_u8(vec.y).unwrap();
+    f.write_u8(vec.z).unwrap();
 }

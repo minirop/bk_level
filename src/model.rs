@@ -4,8 +4,8 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 
+use byteorder::WriteBytesExt;
 use crate::types::*;
-use crate::types::{ Vector2, Vector3 };
 use std::collections::HashSet;
 use image::RgbaImage;
 use std::env::args;
@@ -63,10 +63,10 @@ pub struct Vertex {
     position: Vector3<i16>,
     flag: u16,
     uv: Vector2<i16>,
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
 }
 
 
@@ -88,9 +88,9 @@ pub struct Texture {
     width: u8,
     height: u8,
     size: u32,
-    #[serde(skip_serializing)]
+    #[serde(skip)]
     hratio: f32,
-    #[serde(skip_serializing)]
+    #[serde(skip)]
     wratio: f32,
     palette: Option<Vec<u8>>,
 }
@@ -322,10 +322,10 @@ impl Model {
             let position = read_3_i16(&mut f);
             let flag = f.read_u16::<BigEndian>()?;
             let uv = read_2_i16(&mut f);
-            let r = (f.read_u8()? as f32) / 256.0;
-            let g = (f.read_u8()? as f32) / 256.0;
-            let b = (f.read_u8()? as f32) / 256.0;
-            let a = (f.read_u8()? as f32) / 256.0;
+            let r = f.read_u8()?;
+            let g = f.read_u8()?;
+            let b = f.read_u8()?;
+            let a = f.read_u8()?;
 
             vertices.push(Vertex {
                 position, flag, uv, r, g, b, a
@@ -779,6 +779,7 @@ impl Model {
 
             let cmd = f.read_u8()?;
 
+            // move to a function
             let command = match cmd {
                 0x00 => {
                     let padding = f.read_u8()?; assert_eq!(padding, 0);
@@ -1045,10 +1046,10 @@ impl Model {
             let position = read_3_i16(&mut f);
             let flag = f.read_u16::<BigEndian>()?;
             let uv = read_2_i16(&mut f);
-            let r = (f.read_u8()? as f32) / 256.0;
-            let g = (f.read_u8()? as f32) / 256.0;
-            let b = (f.read_u8()? as f32) / 256.0;
-            let a = (f.read_u8()? as f32) / 256.0;
+            let r = f.read_u8()?;
+            let g = f.read_u8()?;
+            let b = f.read_u8()?;
+            let a = f.read_u8()?;
 
             vertices.push(Vertex {
                 position, flag, uv, r, g, b, a
@@ -1060,7 +1061,6 @@ impl Model {
         };
 
         let mut unk14 = None;
-
         if unk14_offset > 0 {
             assert_eq!(unk14_offset as u64, f.seek(SeekFrom::Current(0))?);
 
@@ -1106,7 +1106,7 @@ impl Model {
                 let unk2 = read_3_i16(&mut f);
                 let unk3 = f.read_u8()?;
                 let unk4 = f.read_u8()?;
-                let padding = f.read_u16::<BigEndian>()?;
+                let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
 
                 unk14_2.push(ModelUnk14_2 {
                     unk1, unk2, unk3, unk4
@@ -1117,38 +1117,21 @@ impl Model {
                 unk, unk14_0, unk14_1, unk14_2
             });
 
-            // 8 bit alignment?
-            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
-            if alignment < 8 {
-                for _ in 0..alignment {
-                    let padding = f.read_u8()?;
-                }
-            }
+            read_align_8bytes(&mut f);
         }
 
         let mut collisions = None;
         if collision_setup > 0 {
             assert_eq!(collision_setup as u64, f.seek(SeekFrom::Current(0))?);
 
-            let min_x = f.read_i16::<BigEndian>()?;
-            let min_y = f.read_i16::<BigEndian>()?;
-            let min_z = f.read_i16::<BigEndian>()?;
-            let max_x = f.read_i16::<BigEndian>()?;
-            let max_y = f.read_i16::<BigEndian>()?;
-            let max_z = f.read_i16::<BigEndian>()?;
+            let min = read_3_i16(&mut f);
+            let max = read_3_i16(&mut f);
+            let stride = read_2_i16(&mut f);
 
-            let min = Vector3 { x: min_x, y: min_y, z: min_z };
-            let max = Vector3 { x: max_x, y: max_y, z: max_z };
-
-            let y_stride = f.read_i16::<BigEndian>()?;
-            let z_stride = f.read_i16::<BigEndian>()?;
-
-            let stride = Vector2 { x: y_stride, y: z_stride };
-
-            let geo_count = f.read_i16::<BigEndian>()?;
+            let geo_count = f.read_u16::<BigEndian>()?;
             let scale = f.read_u16::<BigEndian>()?;
-            let tri_count = f.read_i16::<BigEndian>()?;
-            let padding = f.read_i16::<BigEndian>()?; assert_eq!(padding, 0);
+            let tri_count = f.read_u16::<BigEndian>()?;
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
 
             let mut geo = vec![];
             for _ in 0..geo_count {
@@ -1182,13 +1165,7 @@ impl Model {
                 min, max, stride, scale, geo, tri
             });
 
-            // maybe 8 bytes alignments?
-            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
-            if alignment < 8 {
-                for _ in 0..alignment {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                }
-            }
+            read_align_8bytes(&mut f);
         }
 
         let mut mesh_list = vec![];
@@ -1213,13 +1190,7 @@ impl Model {
                 });
             }
 
-            // maybe 8 bytes alignments?
-            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
-            if alignment < 8 {
-                for _ in 0..alignment {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                }
-            }
+            read_align_8bytes(&mut f);
         }
 
         let mut unknown28 = vec![];
@@ -1247,13 +1218,7 @@ impl Model {
                 });
             }
 
-            // maybe 8 bytes alignments?
-            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
-            if alignment < 8 {
-                for _ in 0..alignment {
-                    let padding = f.read_u8()?; assert_eq!(padding, 0);
-                }
-            }
+            read_align_8bytes(&mut f);
         }
 
         let mut animation_list = None;
@@ -1305,12 +1270,7 @@ impl Model {
                 unk1, list
             });
 
-            let alignment = 8 - (f.seek(SeekFrom::Current(0))? % 8);
-            if alignment < 8 {
-                for _ in 0..alignment {
-                    let padding = f.read_u8()?;
-                }
-            }
+            read_align_8bytes(&mut f);
         }
 
         let mut animated_textures = vec![];
@@ -1360,6 +1320,241 @@ impl Model {
     }
 
     pub fn write_bin(&self, filename: &str) -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(filename).unwrap();
+
+        f.write_u32::<BigEndian>(0xB)?;
+        for _ in 0..11 {
+            f.write_u32::<BigEndian>(0)?;
+        }
+        f.write_u16::<BigEndian>(self.unk30)?;
+
+        let vertices_count = self.vertex_data.vertices.len() as u16;
+        f.write_u16::<BigEndian>(vertices_count)?;
+        f.write_f32::<BigEndian>(self.unk34)?;
+
+        let texture_setup_offset = f.seek(SeekFrom::Current(0))? as u16;
+        let textures_count = self.textures.len() as u32;
+        f.write_u32::<BigEndian>(textures_count)?; // bytes count
+        f.write_u16::<BigEndian>(vertices_count)?;
+        f.write_u16::<BigEndian>(0)?;
+
+        let mut offset = 0;
+        for tex in &self.textures {
+            f.write_u32::<BigEndian>(offset)?;
+            f.write_u16::<BigEndian>(match tex.format {
+                TextureFormat::C4 => 1,
+                TextureFormat::C8 => 2,
+                TextureFormat::Rgba16 => 4,
+                TextureFormat::Rgba32 => 8,
+                TextureFormat::IA8 => 16,
+            })?;
+            f.write_u16::<BigEndian>(tex.unknown)?;
+            f.write_u8(tex.width)?;
+            f.write_u8(tex.height)?;
+            f.write_u16::<BigEndian>(0)?;
+            f.write_u32::<BigEndian>(0)?;
+
+            offset += tex.size;
+        }
+
+        for tex in &self.textures {
+            for _ in 0..tex.size {
+                f.write_u8(0)?;
+            }
+        }
+
+        let display_list_setup_offset = f.seek(SeekFrom::Current(0))? as u32;
+        f.write_u32::<BigEndian>(self.commands.len() as u32)?;
+        f.write_u32::<BigEndian>(self.unk_display_list)?;
+
+        for cmd in &self.commands {
+            // TODO
+        }
+
+        let vertex_store_setup_offset = f.seek(SeekFrom::Current(0))? as u32;
+        write_3_i16(&mut f, &self.vertex_data.min_coord);
+        write_3_i16(&mut f, &self.vertex_data.max_coord);
+        write_3_i16(&mut f, &self.vertex_data.centre_coord);
+        f.write_i16::<BigEndian>(self.vertex_data.local_norm)?;
+        f.write_u16::<BigEndian>(self.vertex_data.vertices.len() as u16)?;
+        f.write_i16::<BigEndian>(self.vertex_data.global_norm)?;
+
+        for vert in &self.vertex_data.vertices {
+            write_3_i16(&mut f, &vert.position);
+            f.write_u16::<BigEndian>(vert.flag)?;
+            write_2_i16(&mut f, &vert.uv);
+            f.write_u8(vert.r)?;
+            f.write_u8(vert.g)?;
+            f.write_u8(vert.b)?;
+            f.write_u8(vert.a)?;
+        }
+
+        let mut unk14_offset = 0;
+        if let Some(unk14) = &self.unk14 {
+            unk14_offset = f.seek(SeekFrom::Current(0))? as u32;
+
+            f.write_u16::<BigEndian>(unk14.unk14_0.len() as u16)?;
+            f.write_u16::<BigEndian>(unk14.unk14_1.len() as u16)?;
+            f.write_u16::<BigEndian>(unk14.unk14_2.len() as u16)?;
+
+            for unk14_0 in &unk14.unk14_0 {
+                write_3_i16(&mut f, &unk14_0.unk1);
+                write_3_i16(&mut f, &unk14_0.unk2);
+                write_3_i16(&mut f, &unk14_0.unk3);
+                write_3_u8(&mut f, &unk14_0.unk4);
+                f.write_u8(unk14_0.unk5)?;
+                f.write_u8(unk14_0.unk6)?;
+                f.write_u8(unk14_0.unk7)?;
+            }
+
+            for unk14_1 in &unk14.unk14_1 {
+                f.write_u16::<BigEndian>(unk14_1.unk1)?;
+                f.write_u16::<BigEndian>(unk14_1.unk2)?;
+                write_3_i16(&mut f, &unk14_1.unk3);
+                write_3_u8(&mut f, &unk14_1.unk4);
+                f.write_u8(unk14_1.unk5)?;
+                f.write_u8(unk14_1.unk6)?;
+                f.write_u8(unk14_1.unk7)?;
+            }
+
+            for unk14_2 in &unk14.unk14_2 {
+                f.write_u16::<BigEndian>(unk14_2.unk1)?;
+                write_3_i16(&mut f, &unk14_2.unk2);
+                f.write_u8(unk14_2.unk3)?;
+                f.write_u8(unk14_2.unk4)?;
+                f.write_u16::<BigEndian>(0)?;
+            }
+
+            write_align_8bytes(&mut f);
+        }
+
+        let mut collision_setup = 0;
+        if let Some(collisions) = &self.collisions {
+            collision_setup = f.seek(SeekFrom::Current(0))? as u32;
+
+            write_3_i16(&mut f, &collisions.min);
+            write_3_i16(&mut f, &collisions.max);
+            write_2_i16(&mut f, &collisions.stride);
+
+            f.write_u16::<BigEndian>(collisions.geo.len() as u16)?;
+            f.write_u16::<BigEndian>(collisions.scale)?;
+            f.write_u16::<BigEndian>(collisions.tri.len() as u16)?;
+            f.write_u16::<BigEndian>(0)?;
+
+            for geo in &collisions.geo {
+                f.write_u16::<BigEndian>(geo.start_tri_index)?;
+                f.write_u16::<BigEndian>(geo.tri_count)?;
+            }
+
+            for tri in &collisions.tri {
+                f.write_u16::<BigEndian>(tri.vtx_indx_1)?;
+                f.write_u16::<BigEndian>(tri.vtx_indx_2)?;
+                f.write_u16::<BigEndian>(tri.vtx_indx_3)?;
+                f.write_u16::<BigEndian>(tri.unk)?;
+                f.write_u32::<BigEndian>(tri.flags)?;
+            }
+
+            write_align_8bytes(&mut f);
+        }
+
+        let mut effects_setup = 0;
+        if self.mesh_list.len() > 0 {
+            effects_setup = f.seek(SeekFrom::Current(0))? as u32;
+
+            f.write_u16::<BigEndian>(self.mesh_list.len() as u16)?;
+            for mesh in &self.mesh_list {
+                f.write_u16::<BigEndian>(mesh.id)?;
+                f.write_u16::<BigEndian>(mesh.vertices.len() as u16)?;
+
+                for vtx in &mesh.vertices {
+                    f.write_u16::<BigEndian>(*vtx)?;
+                }
+            }
+
+            write_align_8bytes(&mut f);
+        }
+
+        let mut unk28_offset = 0;
+        if self.unk28.len() > 0 {
+            unk28_offset = f.seek(SeekFrom::Current(0))? as u32;
+
+            f.write_u16::<BigEndian>(self.unk28.len() as u16)?;
+            f.write_u16::<BigEndian>(0)?;
+
+            for unk28 in &self.unk28 {
+                write_3_i16(&mut f, &unk28.coord);
+                f.write_u8(unk28.anim_index)?;
+                f.write_u8(unk28.vtx_list.len() as u8)?;
+
+                for vtx in &unk28.vtx_list {
+                    f.write_u16::<BigEndian>(*vtx)?;
+                }
+            }
+
+            write_align_8bytes(&mut f);
+        }
+
+        let mut animation_setup = 0;
+        if let Some(animation_list) = &self.animation_list {
+            animation_setup = f.seek(SeekFrom::Current(0))? as u32;
+
+            f.write_f32::<BigEndian>(animation_list.unk)?;
+            f.write_u16::<BigEndian>(animation_list.animations.len() as u16)?;
+            f.write_u16::<BigEndian>(0)?;
+
+            for anim in &animation_list.animations {
+                write_3_floats(&mut f, &anim.unk);
+                f.write_i16::<BigEndian>(anim.bone)?;
+                f.write_i16::<BigEndian>(anim.mtx)?;
+            }
+        }
+
+        let mut unk20_offset = 0;
+        if let Some(unknown20) = &self.unk20 {
+            unk20_offset = f.seek(SeekFrom::Current(0))? as u32;
+            f.write_u8(unknown20.list.len() as u8)?;
+            f.write_u8(unknown20.unk1)?;
+
+            for unk20_0 in &unknown20.list {
+                write_3_i16(&mut f, &unk20_0.unk1);
+                write_3_i16(&mut f, &unk20_0.unk2);
+                f.write_u8(unk20_0.unk3)?;
+                f.write_u8(unk20_0.unk4)?;
+            }
+
+            write_align_8bytes(&mut f);
+        }
+
+        let mut animated_textures_offset = 0;
+        if self.animated_textures.len() > 0 {
+            animated_textures_offset = f.seek(SeekFrom::Current(0))? as u32;
+            assert_eq!(self.animated_textures.len(), 4);
+
+            for anim_tex in &self.animated_textures {
+                f.write_u16::<BigEndian>(anim_tex.size)?;
+                f.write_u16::<BigEndian>(anim_tex.count)?;
+                f.write_f32::<BigEndian>(anim_tex.rate)?;
+            }
+        }
+
+        let geometry_offset = f.seek(SeekFrom::Current(0))? as u32;
+        // TODO
+
+        // update header pointers
+        f.seek(SeekFrom::Start(4))?;
+        f.write_u32::<BigEndian>(geometry_offset)?;
+        f.write_u16::<BigEndian>(texture_setup_offset)?;
+        f.write_u16::<BigEndian>(self.geometry_type)?;
+        f.write_u32::<BigEndian>(display_list_setup_offset)?;
+        f.write_u32::<BigEndian>(vertex_store_setup_offset)?;
+        f.write_u32::<BigEndian>(unk14_offset)?;
+        f.write_u32::<BigEndian>(animation_setup)?;
+        f.write_u32::<BigEndian>(collision_setup)?;
+        f.write_u32::<BigEndian>(unk20_offset)?;
+        f.write_u32::<BigEndian>(effects_setup)?;
+        f.write_u32::<BigEndian>(unk28_offset)?;
+        f.write_u32::<BigEndian>(animated_textures_offset)?;
+
         Ok(())
     }
 
@@ -1558,4 +1753,22 @@ fn read_geometry_layout(f: &mut File) -> std::io::Result<Vec<Geometry>> {
     }
 
     Ok(geometry)
+}
+
+fn read_align_8bytes(f: &mut File) {
+    let alignment = 8 - (f.seek(SeekFrom::Current(0)).unwrap() % 8);
+    if alignment < 8 {
+        for _ in 0..alignment {
+            let padding = f.read_u8().unwrap();
+        }
+    }
+}
+
+fn write_align_8bytes(f: &mut File) {
+    let alignment = 8 - (f.seek(SeekFrom::Current(0)).unwrap() % 8);
+    if alignment < 8 {
+        for _ in 0..alignment {
+            f.write_u8(0).unwrap();
+        }
+    }
 }
