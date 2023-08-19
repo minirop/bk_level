@@ -18,8 +18,6 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 
-use crate::types::{ Vector3, Vector2 };
-
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SetupFile {
     pub cameras: Vec<Camera>,
@@ -38,9 +36,9 @@ pub enum Camera {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum SmallObject {
-    Sprite { object: u16, size: u16, x: u16, y: u16, z: u16, unk1: u8, unk2: u8 },
-    Static { object: u16, y_rot: u8, xz_rot: u8, x: u16, y: u16, z: u16, size: u8, unk: u8 },
-    Unknown { object: u16, unk1: u8, unk2: u8, unk3: u8, unk4: u8, unk5: u8, unk6: u8, unk7: u8, unk8: u8, unk9: u8, unk10: u8 },
+    Sprite { object: u16, size: u16, x: u16, y: u16, z: u16, unk0: u8, unk1: u8, unk2: u8, unk3: u8, unk4: u8 },
+    Static { object: u16, y_rot: u8, xz_rot: u8, x: u16, y: u16, z: u16, size: u8, unk0: u8, unk1: u8 },
+    Unknown { object: u16, unk0: u8, unk1: u8, unk2: u8, unk3: u8, unk4: u8, unk5: u8, unk6: u8, unk7: u8, unk8: u8, unk9: u8, unk10: u8 },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -187,16 +185,20 @@ fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
 
             for _ in 0..small_objects_count {
                 let object = f.read_u16::<BigEndian>()?;
+                let unk0 = (object & 0xF) as u8;
 
                 if SPRITES_ID.contains(&object) {
                     let size = f.read_u16::<BigEndian>()?;
+                    let unk1 = (size >> 10) as u8;
+                    let unk2 = (size & 0b11) as u8;
+                    let size = (size >> 2) & 0xFF;
                     let x = f.read_u16::<BigEndian>()?;
                     let y = f.read_u16::<BigEndian>()?;
                     let z = f.read_u16::<BigEndian>()?;
-                    let unk1 = f.read_u8()?;
-                    let unk2 = f.read_u8()?;
+                    let unk3 = f.read_u8()?;
+                    let unk4 = f.read_u8()?;
 
-                    small_objects.push(SmallObject::Sprite { object, size, x, y, z, unk1, unk2 });
+                    small_objects.push(SmallObject::Sprite { object, size, x, y, z, unk0, unk1, unk2, unk3, unk4 });
                 } else if STATICS_ID.contains(&object) {
                     let y_rot = f.read_u8()?;
                     let xz_rot = f.read_u8()?;
@@ -204,9 +206,9 @@ fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
                     let y = f.read_u16::<BigEndian>()?;
                     let z = f.read_u16::<BigEndian>()?;
                     let size = f.read_u8()?;
-                    let unk = f.read_u8()?;
+                    let unk1 = f.read_u8()?;
 
-                    small_objects.push(SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk });
+                    small_objects.push(SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk0, unk1 });
                 } else {
                     let unk1 = f.read_u8()?;
                     let unk2 = f.read_u8()?;
@@ -220,7 +222,7 @@ fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
                     let unk10 = f.read_u8()?;
 
                     small_objects.push(SmallObject::Unknown {
-                        object, unk1, unk2, unk3, unk4, unk5,
+                        object, unk0, unk1, unk2, unk3, unk4, unk5,
                         unk6, unk7, unk8, unk9, unk10 });
                 }
             }
@@ -380,27 +382,31 @@ fn write_voxel(f: &mut File, voxel: &Voxel) -> std::io::Result<()> {
 
             for small in &voxel.small_objects {
                 match small {
-                    SmallObject::Sprite { object, size, x, y, z, unk1, unk2 } => {
-                        f.write_u16::<BigEndian>(*object)?;
-                        f.write_u16::<BigEndian>(*size)?;
+                    SmallObject::Sprite { object, size, x, y, z, unk0, unk1, unk2, unk3, unk4 } => {
+                        let object =(*object << 4) + (*unk0 as u16);
+                        let size = ((*unk1 as u16) << 10) + (*size << 2) + (*unk2 as u16);
+                        f.write_u16::<BigEndian>(object)?;
+                        f.write_u16::<BigEndian>(size)?;
                         f.write_u16::<BigEndian>(*x)?;
                         f.write_u16::<BigEndian>(*y)?;
                         f.write_u16::<BigEndian>(*z)?;
-                        f.write_u8(*unk1)?;
-                        f.write_u8(*unk2)?;
+                        f.write_u8(*unk3)?;
+                        f.write_u8(*unk4)?;
                     },
-                    SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk } => {
-                        f.write_u16::<BigEndian>(*object)?;
+                    SmallObject::Static { object, y_rot, xz_rot, x, y, z, size, unk0, unk1 } => {
+                        let object =(*object << 4) + (*unk0 as u16);
+                        f.write_u16::<BigEndian>(object)?;
                         f.write_u8(*y_rot)?;
                         f.write_u8(*xz_rot)?;
                         f.write_u16::<BigEndian>(*x)?;
                         f.write_u16::<BigEndian>(*y)?;
                         f.write_u16::<BigEndian>(*z)?;
                         f.write_u8(*size)?;
-                        f.write_u8(*unk)?;
+                        f.write_u8(*unk1)?;
                     },
-                    SmallObject::Unknown { object, unk1, unk2, unk3, unk4, unk5, unk6, unk7, unk8, unk9, unk10 } => {
-                        f.write_u16::<BigEndian>(*object)?;
+                    SmallObject::Unknown { object, unk0, unk1, unk2, unk3, unk4, unk5, unk6, unk7, unk8, unk9, unk10 } => {
+                        let object =(*object << 4) + (*unk0 as u16);
+                        f.write_u16::<BigEndian>(object)?;
                         f.write_u8(*unk1)?;
                         f.write_u8(*unk2)?;
                         f.write_u8(*unk3)?;
