@@ -92,8 +92,15 @@ fn main() {
         },
         InputFormat::Yaml => {
             if let Some(setupfile) = SetupFile::read_yaml(filename) {
-                let output_name = format!("{}_repack.bin", output_name);
-                setupfile.write_bin(&output_name).unwrap();
+                let format = if let Some(format) = args.output { format } else { OutputFormat::Bin };
+                match format {
+                    OutputFormat::Bin => {
+                        let output_name = format!("{}_repack.bin", output_name);
+                        setupfile.write_bin(&output_name).unwrap();
+                    },
+                    OutputFormat::Obj => panic!("Can't convert setup file to .obj"),
+                    OutputFormat::Yaml => panic!("Why would you want to convert .yaml to .yaml?"),
+                };
             } else if let Some(model) = Model::read_yaml(filename) {
                 let format = if let Some(format) = args.output { format } else { OutputFormat::Bin };
                 match format {
@@ -104,7 +111,7 @@ fn main() {
                     OutputFormat::Obj => {
                         model.write_obj(&output_name).unwrap();
                     },
-                    OutputFormat::Yaml => panic!("Why would you want to convert YAML to YAML?"),
+                    OutputFormat::Yaml => panic!("Why would you want to convert .yaml to .yaml?"),
                 };
             } else {
                 panic!("{} is not a valid YAML file.", filename);
