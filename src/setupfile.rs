@@ -1,22 +1,7 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-
 use crate::types::*;
-use std::collections::HashSet;
-use image::RgbaImage;
-use std::env::args;
 use byteorder::{ ReadBytesExt, WriteBytesExt, BigEndian };
-use clap::Parser;
 use serde::{ Serialize, Deserialize };
-use std::path::Path;
 use std::fs::File;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Read;
-use std::io::Write;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SetupFile {
@@ -100,7 +85,7 @@ fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
 
         let mut list_type = f.read_u8()?;
         if list_type == 11 { // complex objects list
-            for i in 0..big_objects_count {
+            for _ in 0..big_objects_count {
                 let x = f.read_u16::<BigEndian>()?;
                 let y = f.read_u16::<BigEndian>()?;
                 let z = f.read_u16::<BigEndian>()?;
@@ -246,7 +231,6 @@ fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
 
 fn write_voxel(f: &mut File, voxel: &Voxel) -> std::io::Result<()> {
     let has_complex = voxel.complex_objects.len() > 0;
-    let has_small = voxel.small_objects.len() > 0;
 
     if !voxel.missing {
         f.write_u8(3)?;
@@ -256,20 +240,20 @@ fn write_voxel(f: &mut File, voxel: &Voxel) -> std::io::Result<()> {
         if has_complex {
             f.write_u8(11)?;
 
-            let mut nx: u16 = 0;
-            let mut ny: u16 = 0;
-            let mut nz: u16 = 0;
-            let mut nscript: u16 = 0;
-            let mut nobject: u16 = 0;
-            let mut nunk_0a: u8 = 0;
-            let mut nunk_0b: u8 = 0;
-            let mut nunk_0c: u8 = 0;
-            let mut nunk_0d: u8 = 0;
-            let mut nunk_0e: u8 = 0;
-            let mut nunk_0f: u8 = 0;
-            let mut ncurrent: u16 = 0;
-            let mut nnext: u16 = 0;
-            let mut nend: u8 = 0;
+            let mut nx: u16;
+            let mut ny: u16;
+            let mut nz: u16;
+            let mut nscript: u16;
+            let mut nobject: u16;
+            let mut nunk_0a: u8;
+            let mut nunk_0b: u8;
+            let mut nunk_0c: u8;
+            let mut nunk_0d: u8;
+            let mut nunk_0e: u8;
+            let mut nunk_0f: u8;
+            let mut ncurrent: u16;
+            let mut nnext: u16;
+            let mut nend: u8;
 
             for complex in &voxel.complex_objects {
                 match complex {
@@ -505,7 +489,7 @@ const STATICS_ID: [u16; 28] = [0x0002, 0x0009, 0x000A, 0x000B, 0x000C, 0x000E, 0
 impl SetupFile {
     pub fn read_bin(filename: &str) -> std::io::Result<SetupFile> {
         let mut f = File::open(filename)?;
-        let header = f.read_u16::<BigEndian>()?;
+        let header = f.read_u16::<BigEndian>()?; assert_eq!(header, 0x0B);
         let negative_x_voxel_count = f.read_i32::<BigEndian>()?;
         let negative_y_voxel_count = f.read_i32::<BigEndian>()?;
         let negative_z_voxel_count = f.read_i32::<BigEndian>()?;

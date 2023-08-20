@@ -11,22 +11,10 @@ pub struct Vector3<T> {
     pub z: T,
 }
 
-impl<T: std::default::Default> Vector3<T> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-}
-
 #[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vector2<T> {
     pub x: T,
     pub y: T,
-}
-
-impl<T: std::default::Default> Vector2<T> {
-    pub fn new() -> Self {
-        Default::default()
-    }
 }
 
 pub fn read_2_floats(f: &mut File) -> Vector2<f32> {

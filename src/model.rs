@@ -1,16 +1,8 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-
 use byteorder::WriteBytesExt;
 use crate::types::*;
 use std::collections::HashSet;
 use image::RgbaImage;
-use std::env::args;
 use byteorder::{ ReadBytesExt, BigEndian };
-use clap::Parser;
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
 use std::fs::File;
@@ -211,6 +203,7 @@ struct Command {
     b1: u8,
     b2: u8,
     b3: u8,
+    #[allow(dead_code)]
     b4: u8,
     b5: u8,
     b6: u8,
@@ -292,8 +285,8 @@ impl Model {
         std::fs::create_dir_all(output_dir)?;
 
         // HEADER
-        let coll_start = f.read_u32::<BigEndian>()? + 24;
-        let unk0x08_0x0b = f.read_u32::<BigEndian>()?;
+        let _ = f.read_u32::<BigEndian>()? + 24;
+        let _ = f.read_u32::<BigEndian>()?;
         let f3d_start = f.read_u32::<BigEndian>()? + 8;
         let vert_start = f.read_u32::<BigEndian>()? + 24;
 
@@ -335,15 +328,15 @@ impl Model {
         f.seek(SeekFrom::Start(64))?;
 
         let mut textures: Vec<Texture> = vec![];
-        for i in 0..tex_count {
+        for _ in 0..tex_count {
             let mut tex = Texture::new();
 
             tex.offset = f.read_u32::<BigEndian>()?;
-            let unknown = f.read_u32::<BigEndian>()?;
+            let _unknown = f.read_u32::<BigEndian>()?;
             tex.width = f.read_u8()?;
             tex.height = f.read_u8()?;
-            let unknown = f.read_u16::<BigEndian>()?;
-            let unknown = f.read_u32::<BigEndian>()?;
+            let _unknown = f.read_u16::<BigEndian>()?;
+            let _unknown = f.read_u32::<BigEndian>()?;
 
             textures.push(tex);
         }
@@ -624,7 +617,7 @@ impl Model {
                     let pal_size = ((command.value & 0xFFF000) >> 14) * 2 + 2;
                     //assert_eq!(pal_size, 32); // don't handle other sizes
 
-                    let mut cur_tex = &mut textures[current_texture];
+                    let cur_tex = &mut textures[current_texture];
                     let mut palette = vec![];
                     for index1 in 0..pal_size {
                         let texture_offset = cur_tex.offset + 64 + index1;
@@ -635,13 +628,12 @@ impl Model {
 
                     if commands[index1 + 4].id == 186 {
                         new_texture = true;
-                        panic!("186");
                     }
                 },
                 242 => { /* G_SETTILESIZE */ },
                 243 => { /* G_LOADBLOCK */ },
                 245 => {
-                    let num1 = command.value;
+                    let _num1 = command.value;
                     let num2 = ((command.b1 as u32) << 16) + ((command.b2 as u32) << 8) + (command.b3 as u32);
 
                     texture_format = command.b1 >> 5;
@@ -678,7 +670,6 @@ impl Model {
     }
 
     pub fn read_bin(filename: &str) -> std::io::Result<Self> {
-        let file_size = std::fs::metadata(filename).unwrap().len();
         let mut f = File::open(filename)?;
         let header = f.read_u32::<BigEndian>()?; assert_eq!(header, 0x0B);
 
@@ -718,7 +709,7 @@ impl Model {
         assert!(texture_setup_offset != 0);
         assert_eq!(texture_setup_offset as u64, f.seek(SeekFrom::Current(0))?);
 
-        let bytes_count = f.read_u32::<BigEndian>()?;
+        let _bytes_count = f.read_u32::<BigEndian>()?;
         let textures_count = f.read_u16::<BigEndian>()?;
         let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
 
@@ -1326,7 +1317,7 @@ impl Model {
         serde_yaml::to_writer(f, &self).unwrap();
     }
 
-    pub fn write_obj(&self, filename: &str) -> std::io::Result<()> {
+    pub fn write_obj(&self, _filename: &str) -> std::io::Result<()> {
         Ok(())
     }
 }
@@ -1347,6 +1338,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
         },
         0x1 => {
             let size = f.read_u32::<BigEndian>()?;
+            println!("0x1: {:?}", size);
             let pos1 = read_3_floats(f);
             let pos2 = read_3_floats(f);
             let draw_only_nearest = f.read_u16::<BigEndian>()? > 0;
@@ -1363,7 +1355,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
 
             // only the last one doesn't have "padding"
             if f.seek(SeekFrom::Current(0))? < file_size {
-                let padding = f.read_u32::<BigEndian>()?;
+                let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
             }
 
             Geometry::Bone { address, len, id, unk }
@@ -1381,7 +1373,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             Geometry::LoadDisplayList { len, offset, tri_count }
         },
         0x5 => {
-            let len = f.read_u32::<BigEndian>()?;
+            let _len = f.read_u32::<BigEndian>()?;
             
             for _ in 0..8 {
                 if f.seek(SeekFrom::Current(0))? < file_size {
@@ -1409,7 +1401,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             Geometry::ReferencePoint { len, index, bone, pos }
         },
         0xC => {
-            let len = f.read_u32::<BigEndian>()?;
+            let _len = f.read_u32::<BigEndian>()?;
             let child_count = f.read_u16::<BigEndian>()?;
             let selector = f.read_u16::<BigEndian>()?;
 
@@ -1431,7 +1423,7 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
 
             f.seek(SeekFrom::Current(-4))?;
 
-            let mut commands = vec![];
+            let commands = vec![];
             // can have sub commands
             // TODO
 
@@ -1575,6 +1567,7 @@ fn write_geometry_layout_command(f: &mut File, geocmd: &Geometry) -> std::io::Re
             f.write_u32::<BigEndian>(0xC)?;
             f.write_u32::<BigEndian>(0)?;
             f.write_u16::<BigEndian>(indices.len() as u16)?;
+            f.write_u16::<BigEndian>(*selector)?;
             for i in indices {
                 f.write_i32::<BigEndian>(*i)?;
             }
@@ -1640,7 +1633,7 @@ fn read_align_8bytes(f: &mut File) {
     let alignment = 8 - (f.seek(SeekFrom::Current(0)).unwrap() % 8);
     if alignment < 8 {
         for _ in 0..alignment {
-            let padding = f.read_u8().unwrap();
+            let padding = f.read_u8().unwrap(); assert_eq!(padding, 0);
         }
     }
 }
@@ -1915,7 +1908,7 @@ fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
 
             f.write_u8(0x04)?;
             f.write_u8((index / 2) as u8)?;
-            f.write_u16::<BigEndian>(0)?;
+            f.write_u16::<BigEndian>(data)?;
             f.write_u32::<BigEndian>(*address)?;
         },
         F3dex::DisplayList { store_ra, address } => {
@@ -2044,8 +2037,8 @@ fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
             f.write_u8(w)?;
             f.write_u16::<BigEndian>(wh)?;
         },
-        F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
-                palette, clamp_mirror, unwrapped, perspective_div } => {
+        F3dex::SetTile { format: _, depth: _, values_per_row: _, tmem_offset: _, descriptor: _,
+                palette: _, clamp_mirror: _, unwrapped: _, perspective_div: _ } => {
             // TODO
             f.write_u64::<BigEndian>(0xF5 << 56)?
         },

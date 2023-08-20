@@ -1,21 +1,5 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-
-use std::collections::HashSet;
-use image::RgbaImage;
-use std::env::args;
-use byteorder::{ReadBytesExt, BigEndian};
 use clap::{ Parser, ValueEnum };
-use serde::{ Serialize, Deserialize };
 use std::path::Path;
-use std::fs::File;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Read;
-use std::io::Write;
 
 mod types;
 
