@@ -28,9 +28,9 @@ pub struct SetupFile {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Camera {
     Type0 { id: u16 },
-    Type1 { id: u16, position: Vector3<f32>, speed: Vector2<f32>, rot_acc: Vector2<f32>, angles: Vector3<f32>, unk: u32 },
+    Type1 { id: u16, position: Vector3<f32>, speed: Vector2<f32>, rotation: f32, acceleration: f32, angles: Vector3<f32>, unk: u32 },
     Type2 { id: u16, position: Vector3<f32>, angles: Vector3<f32> },
-    Type3 { id: u16, position: Vector3<f32>, speed: Vector2<f32>, rot_acc: Vector2<f32>, angles: Vector3<f32>, unk: u32, distances: Vector2<f32> },
+    Type3 { id: u16, position: Vector3<f32>, speed: Vector2<f32>, rotation: f32, acceleration: f32, angles: Vector3<f32>, unk: u32, distances: Vector2<f32> },
     Type4 { id: u16, unk: u32 },
 }
 
@@ -186,6 +186,7 @@ fn read_voxel(f: &mut File, position: Vector3<i32>) -> std::io::Result<Voxel> {
             for _ in 0..small_objects_count {
                 let object = f.read_u16::<BigEndian>()?;
                 let unk0 = (object & 0xF) as u8;
+                let object = object >> 4;
 
                 if SPRITES_ID.contains(&object) {
                     let size = f.read_u16::<BigEndian>()?;
@@ -432,7 +433,7 @@ fn write_camera(f: &mut File, camera: &Camera) -> std::io::Result<()> {
             f.write_u16::<BigEndian>(*id)?;
             f.write_u8(2)?;
         },
-        Camera::Type1 { id, position, speed, rot_acc, angles, unk } => {
+        Camera::Type1 { id, position, speed, rotation, acceleration, angles, unk } => {
             f.write_u16::<BigEndian>(*id)?;
             f.write_u8(2)?;
             f.write_u8(1)?;
@@ -442,7 +443,8 @@ fn write_camera(f: &mut File, camera: &Camera) -> std::io::Result<()> {
             f.write_u8(2)?;
             write_2_floats(f, speed);
             f.write_u8(3)?;
-            write_2_floats(f, rot_acc);
+            f.write_f32::<BigEndian>(*rotation)?;
+            f.write_f32::<BigEndian>(*acceleration)?;
             f.write_u8(4)?;
             write_3_floats(f, angles);
             f.write_u8(5)?;
@@ -458,7 +460,7 @@ fn write_camera(f: &mut File, camera: &Camera) -> std::io::Result<()> {
             f.write_u8(2)?;
             write_3_floats(f, angles);
         },
-        Camera::Type3 { id, position, speed, rot_acc, angles, unk, distances } => {
+        Camera::Type3 { id, position, speed, rotation, acceleration, angles, unk, distances } => {
             f.write_u16::<BigEndian>(*id)?;
             f.write_u8(2)?;
             f.write_u8(3)?;
@@ -468,7 +470,8 @@ fn write_camera(f: &mut File, camera: &Camera) -> std::io::Result<()> {
             f.write_u8(2)?;
             write_2_floats(f, speed);
             f.write_u8(3)?;
-            write_2_floats(f, rot_acc);
+            f.write_f32::<BigEndian>(*rotation)?;
+            f.write_f32::<BigEndian>(*acceleration)?;
             f.write_u8(4)?;
             write_3_floats(f, angles);
             f.write_u8(5)?;
@@ -496,8 +499,8 @@ const ACTORS_ID: [u16; 351] = [0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0
 const TIMERS_ID: [u16; 2] = [0x002C, 0x0065];
 const SCRIPTS_ID: [u16; 50] = [0x0000, 0x0001, 0x0002, 0x0002, 0x0012, 0x0015, 0x0016, 0x0017, 0x0013, 0x0037, 0x0071, 0x0072, 0x0075, 0x0076, 0x0076, 0x0077, 0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x007F, 0x0103, 0x0104, 0x0105, 0x0106, 0x0149, 0x014A, 0x016E, 0x01B0, 0x01CF, 0x0349, 0x0373, 0x0373, 0x0373, 0x0373, 0x0373, 0x0373, 0x0376, 0x0379, 0x0379, 0x0379, 0x0379, 0x03B9, 0x03BA, 0x03BD, 0x03BE, 0x03C3];
 // small objects
-const SPRITES_ID: [u16; 41] = [0x00E0, 0x00E7, 0x0380, 0x0387, 0x0460, 0x0465, 0x0467, 0x0470, 0x0477, 0x0500, 0x0540, 0x0541, 0x0544, 0x0550, 0x0551, 0x0552, 0x0554, 0x0555, 0x0556, 0x0940, 0x0970, 0x0D60, 0x1210, 0x13F0, 0x13F2, 0x1400, 0x1403, 0x1404, 0x1407, 0x1410, 0x1413, 0x1450, 0x15F0, 0x1600, 0x1610, 0x1620, 0x1630, 0x1640, 0x1650, 0x1657, 0x1660];
-const STATICS_ID: [u16; 63] = [0x0022, 0x0090, 0x0092, 0x0093, 0x0097, 0x00A2, 0x00A4, 0x00B4, 0x00C0, 0x00C1, 0x00C2, 0x00C4, 0x00C5, 0x00C7, 0x00E5, 0x00E6, 0x00F0, 0x00F2, 0x00F6, 0x00F7, 0x0100, 0x0101, 0x0104, 0x0105, 0x0107, 0x010A, 0x0123, 0x0124, 0x0136, 0x0170, 0x0172, 0x0175, 0x01C4, 0x0206, 0x0260, 0x0263, 0x0264, 0x0267, 0x0270, 0x02A0, 0x02A1, 0x02A5, 0x02B0, 0x02B6, 0x02B7, 0x02E4, 0x02E5, 0x02E7, 0x0370, 0x0604, 0x0610, 0x0614, 0x0630, 0x0640, 0x0642, 0x0644, 0x0645, 0x0647, 0x06F2, 0x0706, 0x0712, 0x0762, 0x07A2];
+const SPRITES_ID: [u16; 23] = [0x000E, 0x0038, 0x0046, 0x0047, 0x0050, 0x0054, 0x0055, 0x0094, 0x0097, 0x00D6, 0x0121, 0x013F, 0x0140, 0x0141, 0x0145, 0x015F, 0x0160, 0x0161, 0x0162, 0x0163, 0x0164, 0x0165, 0x0166];
+const STATICS_ID: [u16; 28] = [0x0002, 0x0009, 0x000A, 0x000B, 0x000C, 0x000E, 0x000F, 0x0010, 0x0012, 0x0013, 0x0017, 0x001C, 0x0020, 0x0026, 0x0027, 0x002A, 0x002B, 0x002E, 0x0037, 0x0060, 0x0061, 0x0063, 0x0064, 0x006F, 0x0070, 0x0071, 0x0076, 0x007A];
 
 impl SetupFile {
     pub fn read_bin(filename: &str) -> std::io::Result<SetupFile> {
@@ -572,7 +575,8 @@ impl SetupFile {
                     
                     let section_id = f.read_u8()?;
                     assert_eq!(section_id, 3);
-                    let rot_acc = read_2_floats(&mut f);
+                    let rotation = f.read_f32::<BigEndian>()?;
+                    let acceleration = f.read_f32::<BigEndian>()?;
                     
                     let section_id = f.read_u8()?;
                     assert_eq!(section_id, 4);
@@ -587,9 +591,9 @@ impl SetupFile {
                         assert_eq!(section_id, 6);
                         let distances = read_2_floats(&mut f);
 
-                        Camera::Type3 { id, position, speed, rot_acc, angles, unk, distances }
+                        Camera::Type3 { id, position, speed, rotation, acceleration, angles, unk, distances }
                     } else {
-                        Camera::Type1 { id, position, speed, rot_acc, angles, unk }
+                        Camera::Type1 { id, position, speed, rotation, acceleration, angles, unk }
                     }
                 },
                 2 => {
