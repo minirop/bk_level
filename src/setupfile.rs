@@ -489,7 +489,7 @@ const STATICS_ID: [u16; 28] = [0x0002, 0x0009, 0x000A, 0x000B, 0x000C, 0x000E, 0
 impl SetupFile {
     pub fn read_bin(filename: &str) -> std::io::Result<SetupFile> {
         let mut f = File::open(filename)?;
-        let header = f.read_u16::<BigEndian>()?; assert_eq!(header, 0x0B);
+        let header = f.read_u16::<BigEndian>()?; assert_eq!(header, 0x0101);
         let negative_x_voxel_count = f.read_i32::<BigEndian>()?;
         let negative_y_voxel_count = f.read_i32::<BigEndian>()?;
         let negative_z_voxel_count = f.read_i32::<BigEndian>()?;
