@@ -1,3 +1,6 @@
+#![allow(unused_assignments)]
+#![allow(unused_variables)]
+
 use byteorder::WriteBytesExt;
 use crate::types::*;
 use std::collections::HashSet;
@@ -10,6 +13,7 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
+use hex::ToHex;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
@@ -84,6 +88,7 @@ pub struct Texture {
     hratio: f32,
     #[serde(skip)]
     wratio: f32,
+    raw: String,
     palette: Option<Vec<u8>>,
 }
 
@@ -98,6 +103,7 @@ impl Texture {
             size: 0,
             hratio: 1.0,
             wratio: 1.0,
+            raw: String::new(),
             palette: None,
         }
     }
@@ -211,7 +217,7 @@ struct Command {
     value: u32,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Copy, Clone)]
 pub enum ColourFormat {
     Rgba,
     Yuv,
@@ -589,6 +595,7 @@ impl Model {
                 },
                 183 => { /* G_SETGEOMETRYMODE */ },
                 184 => { /* G_ENDDL */ },
+                185 => { /* G_SetOtherMode_L */ },
                 186 => { /* G_SetOtherMode_H */ },
                 187 => {
                     sscale = ((command.value >> 16) as f32) / 65536.0;
@@ -746,9 +753,12 @@ impl Model {
         }
 
         let start = f.seek(SeekFrom::Current(0))? as u32;
-        for texture in &textures {
+        for texture in &mut textures {
             assert_eq!(texture.offset + start, f.seek(SeekFrom::Current(0))? as u32);
-            f.seek(SeekFrom::Current(texture.size as i64))?;
+
+            let mut encoded_pixels: Vec<u8> = vec![0; texture.size as usize];
+            f.read(&mut encoded_pixels).unwrap();
+            texture.raw = encoded_pixels.encode_hex::<String>();
         }
 
         // DISPLAY LIST
@@ -1108,8 +1118,9 @@ impl Model {
         }
 
         for tex in &self.textures {
-            for _ in 0..tex.size {
-                f.write_u8(0)?;
+            let raw = hex::decode(&tex.raw).unwrap();
+            for c in raw {
+                f.write_u8(c)?;
             }
         }
 
@@ -1146,6 +1157,7 @@ impl Model {
             f.write_u16::<BigEndian>(unk14.unk14_0.len() as u16)?;
             f.write_u16::<BigEndian>(unk14.unk14_1.len() as u16)?;
             f.write_u16::<BigEndian>(unk14.unk14_2.len() as u16)?;
+            f.write_u16::<BigEndian>(unk14.unk)?;
 
             for unk14_0 in &unk14.unk14_0 {
                 write_3_i16(&mut f, &unk14_0.unk1);
@@ -1317,7 +1329,70 @@ impl Model {
         serde_yaml::to_writer(f, &self).unwrap();
     }
 
-    pub fn write_obj(&self, _filename: &str) -> std::io::Result<()> {
+    pub fn write_obj(&mut self, output_dir: &str) -> std::io::Result<()> {
+        let mut output_mtl = File::create(format!("{}/output.mtl", output_dir)).expect("Unable to create file");
+        for id in 0..self.textures.len() {
+            let mtlname = format!("material_{:04}", id);
+            writeln!(output_mtl, "newmtl {}", mtlname)?;
+            writeln!(output_mtl, "map_Kd image_{:04}.png\n", id)?;
+        }
+        writeln!(output_mtl, "newmtl material_null")?;
+
+        let mut output = File::create(format!("{}/output.obj", output_dir)).expect("Unable to create file");
+
+        writeln!(output, "mtllib output.mtl")?;
+        for v in &self.vertex_data.vertices {
+            writeln!(output, "v {} {} {}", v.position.x, v.position.y, v.position.z)?;
+        }
+
+        let mut new_texture = false;
+        let mut sscale = 0.0;
+        let mut tscale = 0.0;
+        let mut current_texture = None;
+        let mut texture_format = ColourFormat::Rgba;
+        let mut texel_size = 0;
+        let mut line_size = 0;
+
+        for (index, command) in self.commands.iter().enumerate() {
+            match command {
+                F3dex::ClearGeometryMode(_flags) => {
+                    new_texture = false;
+                },
+                F3dex::SetGeometryMode(_flags) => {},
+                F3dex::Texture { mipmaps: _, descriptor: _, enable: _, scalex, scaley } => {
+                    sscale = *scalex;
+                    tscale = *scaley;
+                },
+                F3dex::SettImg { format: _, depth: _, address, unk: _ } => {
+                    let num = *address & 0x00FFFFFF;
+                    current_texture = None;
+
+                    for i in 0..self.textures.len() {
+                        if self.textures[i].offset == num {
+                            current_texture = Some(i);
+                            break;
+                        }
+                    }
+
+                    if let Some(id) = current_texture {
+                        self.textures[id].set_ratio(sscale, tscale);
+                    }
+
+                    new_texture = true;
+                },
+                F3dex::SetTile { format, depth, values_per_row, tmem_offset: _, descriptor: _,
+                    palette: _, clamp_mirror: _, unwrapped: _, perspective_div: _ } => {
+                        texture_format = *format;
+                        texel_size = *depth;
+                        line_size = *values_per_row;
+                },
+                F3dex::LoadTlut { descriptor: _, colour_count: _ } => {
+                    //
+                },
+                _ => panic!("{:?}", command),
+            };
+        }
+
         Ok(())
     }
 }
@@ -1521,6 +1596,7 @@ fn write_geometry_layout_command(f: &mut File, geocmd: &Geometry) -> std::io::Re
         },
         Geometry::Sort { pos1, pos2, draw_only_nearest, unk1, unk2 } => {
             f.write_u32::<BigEndian>(0x1)?;
+            f.write_u32::<BigEndian>(0x00)?; // size
             write_3_floats(f, pos1);
             write_3_floats(f, pos2);
             f.write_u16::<BigEndian>(if *draw_only_nearest { 1 } else { 0 })?;
@@ -1606,7 +1682,7 @@ fn write_geometry_layout_command(f: &mut File, geocmd: &Geometry) -> std::io::Re
         Geometry::Group0x0f { len, header, commands } => {
             f.write_u32::<BigEndian>(0xF)?;
             f.write_u32::<BigEndian>(*len)?;
-            f.write_u16::<BigEndian>(header.len() as u16 + 12)?;
+            f.write_u16::<BigEndian>(header.len() as u16 + 10)?;
             for b in header {
                 f.write_u8(*b)?;
             }
@@ -1845,20 +1921,20 @@ fn read_command(f: &mut File) -> std::io::Result<F3dex> {
             let tmem_offset = (((b2 & 0b1) as u16) << 8) + (b3 as u16);
             let descriptor = b4; assert_eq!(b4 & 0xF8, 0);
             let palette = b5 >> 4;
-            let clamp_mirror_y = (b5 >> 2) & 0b11;
-            let unwrapped_y = ((b5 << 2) + (b6 >> 6)) & 0b1111;
-            let perspective_div_y = (b6 >> 2) & 0b1111;
-            let clamp_mirror_x = b6 & 0b11;
-            let unwrapped_x = b7 >> 4;
-            let perspective_div_x = b7 & 0b1111;
+            let clamp_mirror_t = (b5 >> 2) & 0b11;
+            let unwrapped_t = ((b5 << 2) + (b6 >> 6)) & 0b1111;
+            let perspective_div_t = (b6 >> 2) & 0b1111;
+            let clamp_mirror_s = b6 & 0b11;
+            let unwrapped_s = b7 >> 4;
+            let perspective_div_s = b7 & 0b1111;
 
             F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
                 palette, clamp_mirror: Vector2 {
-                    x: clamp_mirror_x, y: clamp_mirror_y,
+                    x: clamp_mirror_s, y: clamp_mirror_t,
                 }, unwrapped: Vector2 {
-                    x: unwrapped_x, y: unwrapped_y,
+                    x: unwrapped_s, y: unwrapped_t,
                 }, perspective_div: Vector2 {
-                    x: perspective_div_x, y: perspective_div_y,
+                    x: perspective_div_s, y: perspective_div_t,
                 }
             }
         },
@@ -2010,10 +2086,8 @@ fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
         F3dex::LoadBlock { upper_left_s, upper_left_t, descriptor, texels_count, dxt } => {
             let s = (*upper_left_s >> 4) as u8;
             let st = (*upper_left_s << 12) + *upper_left_t;
-            let texels_count = (*texels_count - 1) * 4; 
-            let dxt = (*dxt - 1) * 4;
-            let t = (texels_count >> 4) as u8;
-            let td = (dxt << 12) + texels_count;
+            let t = (*texels_count >> 4) as u8;
+            let td = (*texels_count << 12) + *dxt;
 
             f.write_u8(0xF3)?;
             f.write_u8(s)?;
@@ -2037,10 +2111,33 @@ fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
             f.write_u8(w)?;
             f.write_u16::<BigEndian>(wh)?;
         },
-        F3dex::SetTile { format: _, depth: _, values_per_row: _, tmem_offset: _, descriptor: _,
-                palette: _, clamp_mirror: _, unwrapped: _, perspective_div: _ } => {
-            // TODO
-            f.write_u64::<BigEndian>(0xF5 << 56)?
+        F3dex::SetTile { format, depth, values_per_row, tmem_offset, descriptor,
+                palette, clamp_mirror, unwrapped, perspective_div } => {
+            f.write_u8(0xF5)?;
+
+            let b1 = match format {
+                ColourFormat::Rgba => 0,
+                ColourFormat::Yuv => 1 << 5,
+                ColourFormat::Palette => 2 << 5,
+                ColourFormat::GrayscaleAlpha => 3 << 5,
+                ColourFormat::Grayscale => 4 << 5,
+            };
+            let depth = (*depth / 4).trailing_zeros() as u8;
+            let b1 = b1 + (depth << 3) + ((*values_per_row >> 7) as u8);
+            let b2 = ((*values_per_row << 1) as u8) + ((*tmem_offset >> 8) as u8);
+            let b3 = *tmem_offset as u8;
+            let b4 = *descriptor;
+            let b5 = (*palette << 4) + (clamp_mirror.y << 2) + (unwrapped.y >> 2);
+            let b6 = (unwrapped.y << 6) + (perspective_div.y << 2) + (clamp_mirror.x);
+            let b7 = (unwrapped.x << 4) + perspective_div.x;
+
+            f.write_u8(b1)?;
+            f.write_u8(b2)?;
+            f.write_u8(b3)?;
+            f.write_u8(b4)?;
+            f.write_u8(b5)?;
+            f.write_u8(b6)?;
+            f.write_u8(b7)?;
         },
         F3dex::SetCombine { unk1, unk2, unk3 } => {
             f.write_u8(0xFC)?;

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 byteorder = "1.4.3"
 clap = { version = "4.3.14", features = ["derive"] }
+hex = "0.4.3"
 image = "0.24.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"

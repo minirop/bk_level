@@ -74,14 +74,16 @@ fn main() {
         },
         InputFormat::Model => {
             match Model::read_bin(filename) {
-                Ok(file) => {
+                Ok(model) => {
                     let format = if let Some(format) = args.output { format } else { OutputFormat::Yaml };
                     match format {
                         OutputFormat::Yaml => {
                             let output_name = format!("{}.yaml", output_name);
-                            file.write_yaml(&output_name);
+                            model.write_yaml(&output_name);
                         },
                         OutputFormat::Obj => {
+                            std::fs::create_dir_all(output_name).unwrap();
+                            //model.write_obj(&output_name).unwrap();
                             Model::read_bin_obj(filename).unwrap();
                         },
                         OutputFormat::Bin => panic!("Why would you want to convert .bin to .bin?"),
@@ -101,7 +103,7 @@ fn main() {
                     OutputFormat::Obj => panic!("Can't convert setup file to .obj"),
                     OutputFormat::Yaml => panic!("Why would you want to convert .yaml to .yaml?"),
                 };
-            } else if let Some(model) = Model::read_yaml(filename) {
+            } else if let Some(mut model) = Model::read_yaml(filename) {
                 let format = if let Some(format) = args.output { format } else { OutputFormat::Bin };
                 match format {
                     OutputFormat::Bin => {
