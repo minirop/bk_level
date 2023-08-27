@@ -1476,7 +1476,8 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             Geometry::ReferencePoint { len, index, bone, pos }
         },
         0xC => {
-            let _len = f.read_u32::<BigEndian>()?;
+            let cur_pos = f.seek(SeekFrom::Current(0))?;
+            let len = f.read_u32::<BigEndian>()?;
             let child_count = f.read_u16::<BigEndian>()?;
             let selector = f.read_u16::<BigEndian>()?;
 
@@ -1498,9 +1499,13 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
 
             f.seek(SeekFrom::Current(-4))?;
 
-            let commands = vec![];
-            // can have sub commands
-            // TODO
+            let mut commands = vec![];
+            if len > 0 {
+                while f.seek(SeekFrom::Current(0))? < offset + (len as u64)  {
+                    let command = read_geometry_layout_command(f)?;
+                    commands.push(command);
+                }
+            }
 
             Geometry::Selector { selector, indices, commands, garbage }
         },
@@ -1525,11 +1530,9 @@ fn read_geometry_layout_command(f: &mut File) -> std::io::Result<Geometry> {
             let padding = f.read_u32::<BigEndian>()?; assert_eq!(padding, 0);
 
             let mut commands = vec![];
-            let mut curr = f.seek(SeekFrom::Current(0))?;
-            while curr < offset + (len as u64) {
+            while f.seek(SeekFrom::Current(0))? < offset + (len as u64)  {
                 let command = read_geometry_layout_command(f)?;
                 commands.push(command);
-                curr = f.seek(SeekFrom::Current(0))?;
             }
 
             Geometry::Unknown0x0e { len, vec1, vec2, commands }
