@@ -1,11 +1,11 @@
 #![allow(unused_assignments)]
 #![allow(unused_variables)]
+#![allow(unused_imports)]
 
-use byteorder::WriteBytesExt;
 use crate::types::*;
 use std::collections::HashSet;
 use image::RgbaImage;
-use byteorder::{ ReadBytesExt, BigEndian };
+use byteorder::{ ReadBytesExt, BigEndian, WriteBytesExt };
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
 use std::fs::File;
@@ -14,6 +14,10 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 use hex::ToHex;
+use gltf_json as json;
+use json::validation::Checked::Valid;
+use std::borrow::Cow;
+use std::mem;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
@@ -64,7 +68,6 @@ pub struct Vertex {
     b: u8,
     a: u8,
 }
-
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct VertexData {
@@ -204,19 +207,6 @@ pub struct Frame {
     rate: f32,
 }
 
-struct Command {
-    id: u8,
-    b1: u8,
-    b2: u8,
-    b3: u8,
-    #[allow(dead_code)]
-    b4: u8,
-    b5: u8,
-    b6: u8,
-    b7: u8,
-    value: u32,
-}
-
 #[derive(Debug, PartialEq, Serialize, Deserialize, Copy, Clone)]
 pub enum ColourFormat {
     Rgba,
@@ -279,403 +269,6 @@ pub enum Geometry {
 }
 
 impl Model {
-    pub fn read_bin_obj(filename: &str) -> std::io::Result<()> {
-        let file_size = std::fs::metadata(filename).unwrap().len();
-        let mut f = File::open(filename)?;
-        let header = f.read_u32::<BigEndian>()?;
-        assert_eq!(header, 0x0B);
-
-        let output_dir = Path::new(filename);
-        let output_dir = output_dir.file_stem().unwrap();
-        let output_dir = output_dir.to_str().unwrap();
-        std::fs::create_dir_all(output_dir)?;
-
-        // HEADER
-        let _ = f.read_u32::<BigEndian>()? + 24;
-        let _ = f.read_u32::<BigEndian>()?;
-        let f3d_start = f.read_u32::<BigEndian>()? + 8;
-        let vert_start = f.read_u32::<BigEndian>()? + 24;
-
-        f.seek(SeekFrom::Start((f3d_start - 6) as u64))?;
-        let f3d_commands_count = f.read_u16::<BigEndian>()?;
-
-        f.seek(SeekFrom::Start(50))?;
-        let vt_count = f.read_u16::<BigEndian>()?;
-        f.seek(SeekFrom::Start(57))?;
-        let top_length = f.read_u8()?;
-        let middle_length = f.read_u8()?;
-        let bottom_length = f.read_u8()?;
-        let length = ((top_length as u32) << 16) + ((middle_length as u32) << 8) + (bottom_length as u32);
-        let tex_count = f.read_u16::<BigEndian>()?;
-
-        if tex_count == 0 {
-            panic!("According to BB, 0 textures mean 1. But for now, panic!");
-        }
-
-        // READ VERTICES
-        f.seek(SeekFrom::Start((vert_start) as u64))?;
-
-        let mut vertices: Vec<Vertex> = vec![];
-        for _ in 0..vt_count {
-            let position = read_3_i16(&mut f);
-            let flag = f.read_u16::<BigEndian>()?;
-            let uv = read_2_i16(&mut f);
-            let r = f.read_u8()?;
-            let g = f.read_u8()?;
-            let b = f.read_u8()?;
-            let a = f.read_u8()?;
-
-            vertices.push(Vertex {
-                position, flag, uv, r, g, b, a
-            });
-        }
-
-        // READ TEXTURES
-        f.seek(SeekFrom::Start(64))?;
-
-        let mut textures: Vec<Texture> = vec![];
-        for _ in 0..tex_count {
-            let mut tex = Texture::new();
-
-            tex.offset = f.read_u32::<BigEndian>()?;
-            let _unknown = f.read_u32::<BigEndian>()?;
-            tex.width = f.read_u8()?;
-            tex.height = f.read_u8()?;
-            let _unknown = f.read_u16::<BigEndian>()?;
-            let _unknown = f.read_u32::<BigEndian>()?;
-
-            textures.push(tex);
-        }
-
-        let length2 = length - (tex_count as u32 * 16) - 8;
-        if length2 > 0x80000000 { panic!("negative length2?!!"); }
-
-        if length2 > 0 {
-            let file_pos = f.stream_position()?;
-            let remaining = (file_size - file_pos) as u32;
-            if length2 <= remaining {
-                // LOL? useless code
-            } else {
-                panic!("ERROR");
-            }
-        }
-
-        // READ COMMANDS
-        f.seek(SeekFrom::Start(f3d_start as u64))?;
-
-        let mut commands: Vec<Command> = vec![];
-        for i in 0..f3d_commands_count {
-            let id = f.read_u8()?;
-            let b1 = f.read_u8()?;
-            let b2 = f.read_u8()?;
-            let b3 = f.read_u8()?;
-            let value = f.read_u32::<BigEndian>()?;
-            let b4 = ((value >> 24) & 0xFF) as u8;
-            let b5 = ((value >> 16) & 0xFF) as u8;
-            let b6 = ((value >> 8) & 0xFF) as u8;
-            let b7 = ((value >> 0) & 0xFF) as u8;
-            commands.push(Command { id, b1, b2, b3, b4, b5, b6, b7, value });
-
-            let file_pos = f.stream_position()?;
-            let remaining = (file_size - file_pos) as u32;
-            if remaining < 8 {
-                println!("END AT COMMAND {} ({} bytes remaining)", i, remaining);
-            }
-        }
-
-        // EXEC COMMANDS
-        let mut cache = [0u32; 32usize];
-
-        let mut output_mtl = File::create(format!("{}/output.mtl", output_dir)).expect("Unable to create file");
-        for id in 0..tex_count {
-            let mtlname = format!("material_{:04}", id);
-            writeln!(output_mtl, "newmtl {}", mtlname)?;
-            writeln!(output_mtl, "map_Kd image_{:04}.png\n", id)?;
-        }
-        writeln!(output_mtl, "newmtl material_null")?;
-
-        let mut output = File::create(format!("{}/output.obj", output_dir)).expect("Unable to create file");
-
-        writeln!(output, "mtllib output.mtl")?;
-
-        for v in &vertices {
-            writeln!(output, "v {} {} {}", v.position.x, v.position.y, v.position.z)?;
-        }
-
-        let mut new_texture = false;
-        let mut texture_is_null = true;
-        let mut current_texture = 0;
-        let mut sscale = 0.0;
-        let mut tscale = 0.0;
-        let mut vt_index = 1;
-        let mut texture_format = 0;
-        let mut texel_size = 0;
-        let mut line_size = 0;
-        let mut created_textures = HashSet::<String>::new();
-
-        for (index1, command) in commands.iter().enumerate() {
-            match command.id {
-                4 => {
-                    let start = command.b1 >> 1;
-                    let start = if start > 63 { 63 } else { start };
-                    let count = command.b2 >> 2;
-                    let mut index1 = ((command.value & 0x00FFFFFF) / 16) as usize;
-                    assert!(start+count <= 32);
-
-                    for index2 in start..(start+count) {
-                        if index1 < vertices.len() {
-                            cache[index2 as usize] = index1 as u32;
-                        }
-                        index1 += 1;
-                    }
-
-                    if new_texture {
-                        let mtlpath = format!("image_{:04}.png", current_texture);
-                        if !created_textures.contains(&mtlpath) {
-                            let texture = &textures[current_texture];
-                            let start_offset = texture.offset + 32 + 64 + (textures.len() * 16) as u32;
-                            let pixels_size = (texture.width as usize) * (texture.height as usize) * 4;
-                            let mut pixels: Vec<u8> = vec![0; pixels_size];
-
-                            f.seek(SeekFrom::Start(start_offset as u64))?;
-                            if texture_format == 0 {
-                                if texel_size == 2 {
-                                    let mut encoded_pixels: Vec<u8> = vec![0; pixels_size / 2];
-                                    f.read(&mut encoded_pixels).unwrap();
-
-                                    let mut index1 = 0;
-                                    let mut index3 = 0;
-
-                                    for _ in 0..texture.height {
-                                        for _ in 0..texture.width {
-                                            let num2 = ((encoded_pixels[index3] as u16) << 8) + (encoded_pixels[index3+1] as u16);
-
-                                            pixels[index1] = ((num2 & 0xF800) >> 8) as u8;
-                                            pixels[index1+1] = ((num2 & 0x07C0) >> 3) as u8;
-                                            pixels[index1+2] = ((num2 & 0x003E) << 2) as u8;
-                                            pixels[index1+3] = if num2 & 1 == 1 { 255u8 } else { 0u8 };
-
-                                            index3 += 2;
-                                            index1 += 4;
-                                        }
-                                        if line_size > 0 { panic!("line size: {}", line_size); }
-                                        //index3 += (uint) (this.lineSize * 4 - texture.textureWidth);
-                                    }
-                                } else if texel_size == 3 {
-                                    // raw pixels, doesn't have a palette
-                                    f.seek(SeekFrom::Current(-32))?;
-                                    f.read(&mut pixels).unwrap();
-                                } else {
-                                    panic!("0/{}", texel_size);
-                                }
-                            } else if texture_format == 2 {
-                                if texel_size == 0 {
-                                    let mut encoded_pixels: Vec<u8> = vec![0; pixels_size / 2];
-                                    f.read(&mut encoded_pixels).unwrap();
-
-                                    let mut index1 = 0;
-                                    let mut index7 = 0;
-                                    let Some(palette) = &texture.palette else { todo!() };
-
-                                    for _ in 0..texture.height {
-                                        for _ in 0..(texture.width/2) {
-                                            let index10 = (encoded_pixels[index7] >> 4) as usize;
-                                            let index11 = (encoded_pixels[index7] & 0xF) as usize;
-
-                                            let red10 = palette[index10 * 2] & 0xF8;
-                                            let red11 = palette[index11 * 2] & 0xF8;
-                                            let green10 = ((palette[index10 * 2] & 0x07) << 5) + ((palette[index10 * 2 + 1] & 0xC0) >> 3);
-                                            let green11 = ((palette[index11 * 2] & 0x07) << 5) + ((palette[index11 * 2 + 1] & 0xC0) >> 3);
-                                            let blue10 = (palette[index10 * 2 + 1] & 0x3E) << 2;
-                                            let blue11 = (palette[index11 * 2 + 1] & 0x3E) << 2;
-                                            let alpha10 = if palette[index10 * 2 + 1] & 1 == 1 { 255u8 } else { 0u8 };
-                                            let alpha11 = if palette[index11 * 2 + 1] & 1 == 1 { 255u8 } else { 0u8 };
-
-                                            pixels[index1] = red10;
-                                            pixels[index1+1] = green10;
-                                            pixels[index1+2] = blue10;
-                                            pixels[index1+3] = alpha10;
-                                            pixels[index1+4] = red11;
-                                            pixels[index1+5] = green11;
-                                            pixels[index1+6] = blue11;
-                                            pixels[index1+7] = alpha11;
-
-                                            index1 += 8;
-                                            index7 += 1;
-                                        }
-                                    }
-                                } else if texel_size == 1 {
-                                    panic!("2/1");
-                                } else {
-                                    panic!("2/{}", texel_size);
-                                }
-                            } else if texture_format == 3 {
-                                if texel_size == 1 {
-                                    let mut encoded_pixels: Vec<u8> = vec![0; pixels_size / 2];
-                                    f.read(&mut encoded_pixels).unwrap();
-
-                                    let mut index1 = 0;
-                                    let mut index2 = 0;
-                                    for _ in 0..texture.height {
-                                        for _ in 0..texture.width {
-                                            let num1 = (encoded_pixels[index2] >> 4) as u8;
-                                            let num2 = (encoded_pixels[index2] & 0x0F) as u8;
-                                            pixels[index1] = num1 * 17;
-                                            pixels[index1+1] = num1 * 17;
-                                            pixels[index1+2] = num1 * 17;
-                                            pixels[index1+3] = num2 * 17;
-                                            index1 += 4;
-                                            index2 += 1;
-                                        }
-
-                                        if (line_size as u8) * 8 - texture.width > 0 {
-                                            panic!("texture has padding");
-                                        }
-                                    }
-                                } else if texel_size == 2 {
-                                    panic!("3/2");
-                                } else {
-                                    panic!("3/{}", texel_size);
-                                }
-                            } else {
-                                panic!("{}/{}", texture_format, texel_size);
-                            }
-
-                            if pixels.len() > 0 {
-                                let mtlfullpath = format!("{}/{}", output_dir, mtlpath);
-                                RgbaImage::from_raw(texture.width as u32, texture.height as u32, pixels).unwrap().save(&mtlfullpath).unwrap();
-                                created_textures.insert(mtlpath);
-                            } else {
-                                panic!("pixels are empty!!");
-                            }
-                        }
-                        writeln!(output, "usemtl material_{:04}", current_texture)?;
-                        new_texture = false;
-                    }
-
-                    if texture_is_null {
-                        writeln!(output, "usemtl material_null")?;
-                        texture_is_null = false;
-                    }
-                },
-                6 => {
-                    writeln!(output, "g {:x}", index1)?;
-                },
-                177 => {
-                    let index1 = (command.b1 / 2) as usize;
-                    let index2 = (command.b2 / 2) as usize;
-                    let index3 = (command.b3 / 2) as usize;
-                    let index5 = (command.b5 / 2) as usize;
-                    let index6 = (command.b6 / 2) as usize;
-                    let index7 = (command.b7 / 2) as usize;
-
-                    let v1 = &vertices[ cache[ index1 ] as usize ];
-                    let v2 = &vertices[ cache[ index2 ] as usize ];
-                    let v3 = &vertices[ cache[ index3 ] as usize ];
-                    let v5 = &vertices[ cache[ index5 ] as usize ];
-                    let v6 = &vertices[ cache[ index6 ] as usize ];
-                    let v7 = &vertices[ cache[ index7 ] as usize ];
-                    let tex = &textures[current_texture];
-
-                    writeln!(output, "vt {} {}", (v1.uv.x as f32) * tex.wratio, (v1.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v2.uv.x as f32) * tex.wratio, (v2.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v3.uv.x as f32) * tex.wratio, (v3.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "f {}/{} {}/{} {}/{}", cache[index1]+1, vt_index, cache[index2]+1, vt_index+1, cache[index3]+1, vt_index+2)?;
-                    vt_index += 3;
-
-                    writeln!(output, "vt {} {}", (v5.uv.x as f32) * tex.wratio, (v5.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v6.uv.x as f32) * tex.wratio, (v6.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v7.uv.x as f32) * tex.wratio, (v7.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "f {}/{} {}/{} {}/{}", cache[index5]+1, vt_index, cache[index6]+1, vt_index+1, cache[index7]+1, vt_index+2)?;
-                    vt_index += 3;
-                },
-                182 => {
-                    new_texture = false;
-                    texture_is_null = true;
-                },
-                183 => { /* G_SETGEOMETRYMODE */ },
-                184 => { /* G_ENDDL */ },
-                185 => { /* G_SetOtherMode_L */ },
-                186 => { /* G_SetOtherMode_H */ },
-                187 => {
-                    sscale = ((command.value >> 16) as f32) / 65536.0;
-                    tscale = ((command.value & 0xFFFF) as f32) / 65536.0;
-                },
-                191 => {
-                    let index5 = (command.b5 / 2) as usize;
-                    let index6 = (command.b6 / 2) as usize;
-                    let index7 = (command.b7 / 2) as usize;
-
-                    let v5 = &vertices[ cache[ index5 ] as usize ];
-                    let v6 = &vertices[ cache[ index6 ] as usize ];
-                    let v7 = &vertices[ cache[ index7 ] as usize ];
-                    let tex = &textures[current_texture];
-
-                    writeln!(output, "vt {} {}", (v5.uv.x as f32) * tex.wratio, (v5.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v6.uv.x as f32) * tex.wratio, (v6.uv.y as f32) * tex.hratio * -1.0)?;
-                    writeln!(output, "vt {} {}", (v7.uv.x as f32) * tex.wratio, (v7.uv.y as f32) * tex.hratio * -1.0)?;
-
-                    writeln!(output, "f {}/{} {}/{} {}/{}", cache[index5]+1, vt_index, cache[index6]+1, vt_index+1, cache[index7]+1, vt_index+2)?;
-                    vt_index += 3;
-                },
-                230 => { /* G_RDPLOADSYNC */ },
-                231 => { /* G_RDPPIPESYNC */ },
-                240 => {
-                    let pal_size = ((command.value & 0xFFF000) >> 14) * 2 + 2;
-                    //assert_eq!(pal_size, 32); // don't handle other sizes
-
-                    let cur_tex = &mut textures[current_texture];
-                    let mut palette = vec![];
-                    for index1 in 0..pal_size {
-                        let texture_offset = cur_tex.offset + 64 + index1;
-                        f.seek(SeekFrom::Start((texture_offset + tex_count as u32 * 16) as u64))?;
-                        palette.push(f.read_u8()?);
-                    }
-                    cur_tex.palette = Some(palette);
-
-                    if commands[index1 + 4].id == 186 {
-                        new_texture = true;
-                    }
-                },
-                242 => { /* G_SETTILESIZE */ },
-                243 => { /* G_LOADBLOCK */ },
-                245 => {
-                    let _num1 = command.value;
-                    let num2 = ((command.b1 as u32) << 16) + ((command.b2 as u32) << 8) + (command.b3 as u32);
-
-                    texture_format = command.b1 >> 5;
-                    texel_size = (command.b1 >> 3) & 0b11;
-                    line_size = (num2 >> 9) & 0xF;
-                },
-                252 => { /* G_SETCOMBINE */ },
-                253 => {
-                    let num = command.value & 0x00FFFFFF;
-
-                    current_texture = 0xFFFFFFFF;
-                    for index in 0..tex_count {
-                        if textures[index as usize].offset == num || textures[index as usize].offset + 32 == num {
-                            current_texture = index as usize;
-                            break;
-                        }
-                    }
-
-                    if current_texture != 0xFFFFFFFF {
-                        textures[current_texture].set_ratio(sscale, tscale);
-                    } else {
-                        //println!("TEXTURE NOT FOUND!!!");
-                        current_texture = 0;
-                    }
-
-                    new_texture = true;
-                    texture_is_null = false;
-                },
-                _ => panic!("UNKNOWN COMMAND: {:?}", command.id),
-            };
-        }
-
-        Ok(())
-    }
-
     pub fn read_bin(filename: &str) -> std::io::Result<Self> {
         let mut f = File::open(filename)?;
         let header = f.read_u32::<BigEndian>()?; assert_eq!(header, 0x0B);
@@ -1329,71 +922,200 @@ impl Model {
         serde_yaml::to_writer(f, &self).unwrap();
     }
 
-    pub fn write_obj(&mut self, output_dir: &str) -> std::io::Result<()> {
-        let mut output_mtl = File::create(format!("{}/output.mtl", output_dir)).expect("Unable to create file");
-        for id in 0..self.textures.len() {
-            let mtlname = format!("material_{:04}", id);
-            writeln!(output_mtl, "newmtl {}", mtlname)?;
-            writeln!(output_mtl, "map_Kd image_{:04}.png\n", id)?;
-        }
-        writeln!(output_mtl, "newmtl material_null")?;
+    pub fn write_gltf(&mut self, output_dir: &str) {
+        let min = &self.vertex_data.min_coord;
+        let min = vec![min.x as f32, min.y as f32, min.z as f32];
+        let max = &self.vertex_data.max_coord;
+        let max = vec![max.x as f32, max.y as f32, max.z as f32];
 
-        let mut output = File::create(format!("{}/output.obj", output_dir)).expect("Unable to create file");
+        let mut faces = vec![];
+        let mut cache_vtx = [0u32; 32usize];
 
-        writeln!(output, "mtllib output.mtl")?;
-        for v in &self.vertex_data.vertices {
-            writeln!(output, "v {} {} {}", v.position.x, v.position.y, v.position.z)?;
-        }
-
-        let mut new_texture = false;
-        let mut sscale = 0.0;
-        let mut tscale = 0.0;
-        let mut current_texture = None;
-        let mut texture_format = ColourFormat::Rgba;
-        let mut texel_size = 0;
-        let mut line_size = 0;
-
-        for (index, command) in self.commands.iter().enumerate() {
-            match command {
-                F3dex::ClearGeometryMode(_flags) => {
-                    new_texture = false;
-                },
-                F3dex::SetGeometryMode(_flags) => {},
-                F3dex::Texture { mipmaps: _, descriptor: _, enable: _, scalex, scaley } => {
-                    sscale = *scalex;
-                    tscale = *scaley;
-                },
-                F3dex::SettImg { format: _, depth: _, address, unk: _ } => {
-                    let num = *address & 0x00FFFFFF;
-                    current_texture = None;
-
-                    for i in 0..self.textures.len() {
-                        if self.textures[i].offset == num {
-                            current_texture = Some(i);
-                            break;
+        for cmd in &self.commands {
+            match cmd {
+                F3dex::Vertex { index, count, address } => {
+                    let address = (*address & 0xFFFFFF) / 16;
+                    for idx in 0..(*count as u16) {
+                        let new_val = address + idx as u32;
+                        if (new_val as usize) < self.vertex_data.vertices.len() {
+                            cache_vtx[(*index + idx) as usize] = new_val;
                         }
                     }
-
-                    if let Some(id) = current_texture {
-                        self.textures[id].set_ratio(sscale, tscale);
-                    }
-
-                    new_texture = true;
                 },
-                F3dex::SetTile { format, depth, values_per_row, tmem_offset: _, descriptor: _,
-                    palette: _, clamp_mirror: _, unwrapped: _, perspective_div: _ } => {
-                        texture_format = *format;
-                        texel_size = *depth;
-                        line_size = *values_per_row;
+                F3dex::Triangle1 { v1, v2, v3 } => {
+                    faces.push(Vector3 {
+                        x: cache_vtx[*v1 as usize] as usize,
+                        y: cache_vtx[*v2 as usize] as usize,
+                        z: cache_vtx[*v3 as usize] as usize,
+                    });
                 },
-                F3dex::LoadTlut { descriptor: _, colour_count: _ } => {
-                    //
+                F3dex::Triangle2 { v1, v2, v3, v4, v5, v6 } => {
+                    faces.push(Vector3 {
+                        x: cache_vtx[*v1 as usize] as usize,
+                        y: cache_vtx[*v2 as usize] as usize,
+                        z: cache_vtx[*v3 as usize] as usize,
+                    });
+                    faces.push(Vector3 {
+                        x: cache_vtx[*v4 as usize] as usize,
+                        y: cache_vtx[*v5 as usize] as usize,
+                        z: cache_vtx[*v6 as usize] as usize,
+                    });
                 },
-                _ => panic!("{:?}", command),
+                _ => {},
             };
         }
 
-        Ok(())
+        fn write_vertex(triangle_vertices: &mut Vec<u8>, v: &Vertex) {
+            triangle_vertices.append(&mut (v.position.x as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (v.position.y as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (v.position.z as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (0 as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (0 as f32).to_le_bytes().to_vec());
+            triangle_vertices.push(v.r);
+            triangle_vertices.push(v.g);
+            triangle_vertices.push(v.b);
+            triangle_vertices.push(v.a);
+        }
+
+        let triangle_vertices_len = faces.len() * 3;
+        let mut triangle_vertices = Vec::new();
+        for face in &faces {
+            let v = &self.vertex_data.vertices[ face.x as usize ];
+            write_vertex(&mut triangle_vertices, &v);
+
+            let v = &self.vertex_data.vertices[ face.y as usize ];
+            write_vertex(&mut triangle_vertices, &v);
+
+            let v = &self.vertex_data.vertices[ face.z as usize ];
+            write_vertex(&mut triangle_vertices, &v);
+        }
+        let vertex_size = 24u32;
+
+        let buffer_length = (triangle_vertices_len as u32) * vertex_size;
+        let buffer = json::Buffer {
+            byte_length: buffer_length,
+            extensions: Default::default(),
+            extras: Default::default(),
+            name: None,
+            uri: Some("buffer0.bin".into()),
+        };
+        let buffer_view = json::buffer::View {
+            buffer: json::Index::new(0),
+            byte_length: buffer.byte_length,
+            byte_offset: None,
+            byte_stride: Some(vertex_size),
+            extensions: Default::default(),
+            extras: Default::default(),
+            name: None,
+            target: Some(Valid(json::buffer::Target::ArrayBuffer)),
+        };
+        let positions = json::Accessor {
+            buffer_view: Some(json::Index::new(0)),
+            byte_offset: Some(0),
+            count: triangle_vertices_len as u32,
+            component_type: Valid(json::accessor::GenericComponentType(
+                json::accessor::ComponentType::F32,
+            )),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: Valid(json::accessor::Type::Vec3),
+            min: Some(json::Value::from(Vec::from(min))),
+            max: Some(json::Value::from(Vec::from(max))),
+            name: None,
+            normalized: false,
+            sparse: None,
+        };
+        let textures = json::Accessor {
+            buffer_view: Some(json::Index::new(0)),
+            byte_offset: Some(12u32),
+            count: triangle_vertices_len as u32,
+            component_type: Valid(json::accessor::GenericComponentType(
+                json::accessor::ComponentType::F32,
+            )),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: Valid(json::accessor::Type::Vec2),
+            min: None,
+            max: None,
+            name: None,
+            normalized: false,
+            sparse: None,
+        };
+        let colors = json::Accessor {
+            buffer_view: Some(json::Index::new(0)),
+            byte_offset: Some(20u32),
+            count: triangle_vertices_len as u32,
+            component_type: Valid(json::accessor::GenericComponentType(
+                json::accessor::ComponentType::U8,
+            )),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: Valid(json::accessor::Type::Vec4),
+            min: None,
+            max: None,
+            name: None,
+            normalized: true,
+            sparse: None,
+        };
+
+        let primitive = json::mesh::Primitive {
+            attributes: {
+                let mut map = std::collections::BTreeMap::new();
+                map.insert(Valid(json::mesh::Semantic::Positions), json::Index::new(0));
+                map.insert(Valid(json::mesh::Semantic::TexCoords(0)), json::Index::new(1));
+                map.insert(Valid(json::mesh::Semantic::Colors(0)), json::Index::new(2));
+                map
+            },
+            extensions: Default::default(),
+            extras: Default::default(),
+            indices: None,
+            material: None,
+            mode: Valid(json::mesh::Mode::Triangles),
+            targets: None,
+        };
+
+        let mesh = json::Mesh {
+            extensions: Default::default(),
+            extras: Default::default(),
+            name: None,
+            primitives: vec![primitive],
+            weights: None,
+        };
+
+        let node = json::Node {
+            camera: None,
+            children: None,
+            extensions: Default::default(),
+            extras: Default::default(),
+            matrix: None,
+            mesh: Some(json::Index::new(0)),
+            name: None,
+            rotation: None,
+            scale: None,
+            translation: None,
+            skin: None,
+            weights: None,
+        };
+
+        let root = json::Root {
+            accessors: vec![positions, textures, colors],
+            buffers: vec![buffer],
+            buffer_views: vec![buffer_view],
+            meshes: vec![mesh],
+            nodes: vec![node],
+            scenes: vec![json::Scene {
+                extensions: Default::default(),
+                extras: Default::default(),
+                name: None,
+                nodes: vec![json::Index::new(0)],
+            }],
+            ..Default::default()
+        };
+        let writer = File::create(format!("{}/model.gltf", output_dir)).unwrap();
+        json::serialize::to_writer_pretty(writer, &root).unwrap();
+
+        let mut writer = File::create(format!("{}/buffer0.bin", output_dir)).unwrap();
+        writer.write_all(&triangle_vertices).unwrap();
     }
 }
 

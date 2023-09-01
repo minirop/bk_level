@@ -28,7 +28,7 @@ struct Args {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum OutputFormat {
     Yaml,
-    Obj,
+    Gltf,
     Bin,
 }
 
@@ -74,17 +74,16 @@ fn main() {
         },
         InputFormat::Model => {
             match Model::read_bin(filename) {
-                Ok(model) => {
+                Ok(mut model) => {
                     let format = if let Some(format) = args.output { format } else { OutputFormat::Yaml };
                     match format {
                         OutputFormat::Yaml => {
                             let output_name = format!("{}.yaml", output_name);
                             model.write_yaml(&output_name);
                         },
-                        OutputFormat::Obj => {
+                        OutputFormat::Gltf => {
                             std::fs::create_dir_all(output_name).unwrap();
-                            //model.write_obj(&output_name).unwrap();
-                            Model::read_bin_obj(filename).unwrap();
+                            model.write_gltf(&output_name);
                         },
                         OutputFormat::Bin => panic!("Why would you want to convert .bin to .bin?"),
                     };
@@ -100,7 +99,7 @@ fn main() {
                         let output_name = format!("{}_repack.bin", output_name);
                         setupfile.write_bin(&output_name).unwrap();
                     },
-                    OutputFormat::Obj => panic!("Can't convert setup file to .obj"),
+                    OutputFormat::Gltf => panic!("Can't convert setup file to .gltf"),
                     OutputFormat::Yaml => panic!("Why would you want to convert .yaml to .yaml?"),
                 };
             } else if let Some(mut model) = Model::read_yaml(filename) {
@@ -110,8 +109,8 @@ fn main() {
                         let output_name = format!("{}_repack.bin", output_name);
                         model.write_bin(&output_name).unwrap();
                     },
-                    OutputFormat::Obj => {
-                        model.write_obj(&output_name).unwrap();
+                    OutputFormat::Gltf => {
+                        model.write_gltf(&output_name);
                     },
                     OutputFormat::Yaml => panic!("Why would you want to convert .yaml to .yaml?"),
                 };
