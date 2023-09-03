@@ -1108,7 +1108,6 @@ impl Model {
             TextureFormat::Rgba16 => {
                 let pixels16 = &data[..];
 
-                let mut index1 = 0;
                 let mut pixels16_index = 0;
                 for _ in 0..texture.height {
                     for _ in 0..texture.width {
@@ -1118,6 +1117,23 @@ impl Model {
                         pixels.push(((pixel16 & 0x07C0) >> 3) as u8);
                         pixels.push(((pixel16 & 0x003E) << 2) as u8);
                         pixels.push(if pixel16 & 1 == 1 { 255u8 } else { 0u8 });
+
+                        pixels16_index += 2;
+                    }
+                }
+            },
+            TextureFormat::IA8 => {
+                let pixels16 = &data[..];
+
+                let mut pixels_index = 0;
+                for _ in 0..texture.height {
+                    for _ in 0..texture.width {
+                        let pixel = pixels16[pixels_index];
+
+                        pixels.push(pixel);
+                        pixels.push(pixel);
+                        pixels.push(pixel);
+                        pixels.push(255u8);
                     }
                 }
             },
