@@ -1134,6 +1134,8 @@ impl Model {
                         pixels.push(pixel);
                         pixels.push(pixel);
                         pixels.push(255u8);
+
+                        pixels_index += 1
                     }
                 }
             },
