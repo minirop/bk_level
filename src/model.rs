@@ -1,11 +1,14 @@
 #![allow(unused_assignments)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
+#![allow(unused_mut)]
+#![allow(dead_code)]
+#![allow(unreachable_code)]
 
 use crate::types::*;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use image::RgbaImage;
-use byteorder::{ ReadBytesExt, BigEndian, WriteBytesExt };
+use byteorder::{ ReadBytesExt, BigEndian, WriteBytesExt, LittleEndian };
 use serde::{ Serialize, Deserialize };
 use std::path::Path;
 use std::fs::File;
@@ -14,10 +17,145 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 use hex::ToHex;
-use gltf_json as json;
-use json::validation::Checked::Valid;
-use std::borrow::Cow;
-use std::mem;
+
+mod gltf {
+    use std::collections::HashMap;
+    use serde::{ Serialize, Deserialize };
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(untagged)]
+    pub enum Extension {
+        KhrTextureTransform {
+            scale: [f32; 2],
+            offset: [f32; 2],
+            rotation: f32,
+        },
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Gltf {
+        pub asset: Asset,
+        pub accessors: Vec<Accessor>,
+        pub buffers: Vec<Buffer>,
+        pub buffer_views: Vec<BufferView>,
+        pub images: Vec<Image>,
+        pub materials: Vec<Material>,
+        pub meshes: Vec<Mesh>,
+        pub nodes: Vec<Node>,
+        pub samplers: Vec<Sampler>,
+        pub scenes: Vec<Scene>,
+        pub textures: Vec<Texture>,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Accessor {
+        pub buffer_view: usize,
+        pub byte_offset: u32,
+        pub component_type: u32,
+        pub count: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub max: Option<[f32; 3]>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub min: Option<[f32; 3]>,
+        pub normalized: bool,
+        #[serde(rename(serialize = "type", deserialize = "type"))]
+        pub type_: String,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Asset {
+        pub generator: String,
+        pub version: String,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Buffer {
+        pub byte_length: u32,
+        pub uri: String,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BufferView {
+        pub buffer: usize,
+        pub byte_length: u32,
+        pub byte_offset: u32,
+        pub byte_stride: u32,
+        pub target: usize,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Image {
+        pub uri: String,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Material {
+        pub pbr_metallic_roughness: PbrMetallicRoughness,
+        pub alpha_mode: String,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Mesh {
+        pub primitives: Vec<Primitive>,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Node {
+        pub mesh: usize,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PbrMetallicRoughness {
+        pub base_color_texture: TextureInfo,
+        pub metallic_factor: f32,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Primitive {
+        pub attributes: HashMap<String, usize>,
+        pub material: usize,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Sampler {
+        pub mag_filter: u32,
+        pub min_filter: u32,
+        pub wrap_s: u32,
+        pub wrap_t: u32,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Scene {
+        pub nodes: Vec<usize>,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Texture {
+        pub sampler: usize,
+        pub source: usize,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TextureInfo {
+        pub index: usize,
+        pub extensions: HashMap<String, Extension>,
+    }
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
@@ -62,7 +200,7 @@ pub struct Mesh {
 pub struct Vertex {
     position: Vector3<i16>,
     flag: u16,
-    uv: Vector2<i16>,
+    uv: Vector2<f32>,
     r: u8,
     g: u8,
     b: u8,
@@ -92,7 +230,6 @@ pub struct Texture {
     #[serde(skip)]
     wratio: f32,
     raw: String,
-    palette: Option<Vec<u8>>,
 }
 
 impl Texture {
@@ -107,7 +244,6 @@ impl Texture {
             hratio: 1.0,
             wratio: 1.0,
             raw: String::new(),
-            palette: None,
         }
     }
 
@@ -249,7 +385,7 @@ pub enum F3dex {
         tmem_offset: u16, descriptor: u8, palette: u8,
         clamp_mirror: Vector2<u8>, unwrapped: Vector2<u8>, perspective_div: Vector2<u8> },
     SetCombine { unk1: u8, unk2: u16, unk3: u32 },
-    SettImg { format: ColourFormat, depth: u8, address: u32, unk: u8 },
+    SettImg { format: ColourFormat, depth: u8, address: u32 },
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -397,6 +533,11 @@ impl Model {
             let g = f.read_u8()?;
             let b = f.read_u8()?;
             let a = f.read_u8()?;
+
+            let uv = Vector2 {
+                x: (uv.x as f32) / 65536.0,
+                y: (uv.y as f32) / 65536.0,
+            };
 
             vertices.push(Vertex {
                 position, flag, uv, r, g, b, a
@@ -734,9 +875,13 @@ impl Model {
         f.write_i16::<BigEndian>(self.vertex_data.global_norm)?;
 
         for vert in &self.vertex_data.vertices {
+            let uv = Vector2 { // 
+                x: (vert.uv.x * 65536.0) as i16,
+                y: (vert.uv.y * 65536.0) as i16,
+            };
             write_3_i16(&mut f, &vert.position);
             f.write_u16::<BigEndian>(vert.flag)?;
-            write_2_i16(&mut f, &vert.uv);
+            write_2_i16(&mut f, &uv);
             f.write_u8(vert.r)?;
             f.write_u8(vert.g)?;
             f.write_u8(vert.b)?;
@@ -922,14 +1067,167 @@ impl Model {
         serde_yaml::to_writer(f, &self).unwrap();
     }
 
+    fn export_texture(&self, output_dir: &str, texture: &Texture) -> String {
+        let texture_size = texture.width as u32 * texture.height as u32;
+        let mut pixels = vec![];
+        let data = hex::decode(&texture.raw).unwrap();
+
+        match texture.format {
+            TextureFormat::C4 => {
+                assert_eq!(texture_size / 2 + 32, texture.size);
+                let palette = &data[0..32];
+                let indices = &data[32..];
+
+                let mut indices_index = 0;
+                for _ in 0..texture.height {
+                    for _ in 0..(texture.width/2) {
+                        let left = (indices[indices_index] >> 4) as usize;
+                        let right = (indices[indices_index] & 0xF) as usize;
+                        indices_index += 1;
+
+                        let red_l = palette[left * 2] & 0xF8;
+                        let red_r = palette[right * 2] & 0xF8;
+                        let green_l = ((palette[left * 2] & 0x07) << 5) + ((palette[left * 2 + 1] & 0xC0) >> 3);
+                        let green_r = ((palette[right * 2] & 0x07) << 5) + ((palette[right * 2 + 1] & 0xC0) >> 3);
+                        let blue_l = (palette[left * 2 + 1] & 0x3E) << 2;
+                        let blue_r = (palette[right * 2 + 1] & 0x3E) << 2;
+                        let alpha_l = if palette[left * 2 + 1] & 1 == 1 { 255u8 } else { 0u8 };
+                        let alpha_r = if palette[right * 2 + 1] & 1 == 1 { 255u8 } else { 0u8 };
+
+                        pixels.push(red_l);
+                        pixels.push(green_l);
+                        pixels.push(blue_l);
+                        pixels.push(alpha_l);
+                        pixels.push(red_r);
+                        pixels.push(green_r);
+                        pixels.push(blue_r);
+                        pixels.push(alpha_r);
+                    }
+                }
+            },
+            TextureFormat::Rgba16 => {
+                let pixels16 = &data[..];
+
+                let mut index1 = 0;
+                let mut pixels16_index = 0;
+                for _ in 0..texture.height {
+                    for _ in 0..texture.width {
+                        let pixel16 = ((pixels16[pixels16_index] as u16) << 8) + (pixels16[pixels16_index+1] as u16);
+
+                        pixels.push(((pixel16 & 0xF800) >> 8) as u8);
+                        pixels.push(((pixel16 & 0x07C0) >> 3) as u8);
+                        pixels.push(((pixel16 & 0x003E) << 2) as u8);
+                        pixels.push(if pixel16 & 1 == 1 { 255u8 } else { 0u8 });
+                    }
+                }
+            },
+            _ => {
+                println!("{:?}", texture.format);
+                todo!();
+            },
+        };
+
+        let texture_output_path = format!("{}/texture_{:#X}.png", output_dir, texture.offset);
+        RgbaImage::from_raw(texture.width as u32, texture.height as u32, pixels).unwrap().save(&texture_output_path).unwrap();
+
+        texture_output_path
+    }
+
     pub fn write_gltf(&mut self, output_dir: &str) {
+        let mut root = gltf::Gltf {
+            asset: gltf::Asset {
+                version: "2.0".to_string(),
+                generator: "bk_level".to_string(),
+            },
+            accessors: vec![],
+            buffers: vec![],
+            buffer_views: vec![],
+            images: vec![],
+            materials: vec![],
+            meshes: vec![gltf::Mesh {
+                primitives: vec![],
+            }],
+            nodes: vec![gltf::Node {
+                mesh: 0,
+            }],
+            samplers: vec![gltf::Sampler {
+                mag_filter: 9728,
+                min_filter: 9728,
+                wrap_s: 10497,
+                wrap_t: 10497,
+            }],
+            scenes: vec![gltf::Scene {
+                nodes: vec![0],
+            }],
+            textures: vec![],
+        };
+
+        for texture in &self.textures {
+            let filename = self.export_texture(output_dir, &texture).strip_prefix(&format!("{}/", output_dir)).unwrap().to_string();
+
+            root.textures.push(gltf::Texture {
+                sampler: 0,
+                source: root.images.len(),
+            });
+
+            root.images.push(gltf::Image {
+                uri: filename,
+            });
+
+            root.materials.push(gltf::Material {
+                pbr_metallic_roughness: gltf::PbrMetallicRoughness {
+                    base_color_texture: gltf::TextureInfo {
+                        index: root.textures.len() - 1,
+                        extensions: {
+                            let mut map = HashMap::new();
+                            map.insert("KHR_texture_transform".to_string(), gltf::Extension::KhrTextureTransform {
+                                scale: [20.0, 20.0],
+                                offset: [0.0, 0.0],
+                                rotation: 0.0,
+                            });
+                            map
+                        },
+                    },
+                    metallic_factor: 0.0,
+                },
+                alpha_mode: "BLEND".to_string(),
+            });
+        }
+
         let min = &self.vertex_data.min_coord;
         let min = vec![min.x as f32, min.y as f32, min.z as f32];
         let max = &self.vertex_data.max_coord;
         let max = vec![max.x as f32, max.y as f32, max.z as f32];
 
-        let mut faces = vec![];
         let mut cache_vtx = [0u32; 32usize];
+
+        fn write_vertex_vector(s: &Model, triangle_vertices: &mut Vec<u8>, face: &Vector3<usize>) {
+            let v = &s.vertex_data.vertices[ face.x as usize ];
+            write_vertex(triangle_vertices, &v);
+            let v = &s.vertex_data.vertices[ face.y as usize ];
+            write_vertex(triangle_vertices, &v);
+            let v = &s.vertex_data.vertices[ face.z as usize ];
+            write_vertex(triangle_vertices, &v);
+        }
+
+        fn write_vertex(triangle_vertices: &mut Vec<u8>, v: &Vertex) {
+            triangle_vertices.append(&mut (v.position.x as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (v.position.y as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (v.position.z as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (v.uv.x as f32).to_le_bytes().to_vec());
+            triangle_vertices.append(&mut (v.uv.y as f32).to_le_bytes().to_vec());
+            triangle_vertices.push(v.r);
+            triangle_vertices.push(v.g);
+            triangle_vertices.push(v.b);
+            triangle_vertices.push(v.a);
+        }
+
+        let mut triangle_vertices_len = 0usize;
+        let mut triangle_vertices = Vec::new();
+
+        let mut current_texture = 999999usize;
+        let mut buffer_view_start = 0usize;
+        let mut buffer_view_count = vec![];
 
         for cmd in &self.commands {
             match cmd {
@@ -943,176 +1241,171 @@ impl Model {
                     }
                 },
                 F3dex::Triangle1 { v1, v2, v3 } => {
-                    faces.push(Vector3 {
+                    let face = Vector3 {
                         x: cache_vtx[*v1 as usize] as usize,
                         y: cache_vtx[*v2 as usize] as usize,
                         z: cache_vtx[*v3 as usize] as usize,
-                    });
+                    };
+                    write_vertex_vector(&self, &mut triangle_vertices, &face);
+
+                    triangle_vertices_len += 1;
                 },
                 F3dex::Triangle2 { v1, v2, v3, v4, v5, v6 } => {
-                    faces.push(Vector3 {
+                    let face = Vector3 {
                         x: cache_vtx[*v1 as usize] as usize,
                         y: cache_vtx[*v2 as usize] as usize,
                         z: cache_vtx[*v3 as usize] as usize,
-                    });
-                    faces.push(Vector3 {
+                    };
+                    write_vertex_vector(&self, &mut triangle_vertices, &face);
+
+                    let face = Vector3 {
                         x: cache_vtx[*v4 as usize] as usize,
                         y: cache_vtx[*v5 as usize] as usize,
                         z: cache_vtx[*v6 as usize] as usize,
-                    });
+                    };
+                    write_vertex_vector(&self, &mut triangle_vertices, &face);
+
+                    triangle_vertices_len += 2;
+                },
+                F3dex::SettImg { format, depth, address } => {
+                    let mut found = false;
+                    let mut prev = current_texture;
+                    for (i, tex) in self.textures.iter().enumerate() {
+                        let addr1 = *address & 0xFFFFFF;
+                        let addr2 = if addr1 < 32 { addr1 } else { addr1 - 32 };
+                        
+                        if tex.offset == addr1 || tex.offset == addr2 {
+                            found = true;
+                            current_texture = i;
+                        }
+                    }
+                    assert_eq!(found, true);
+
+                    if current_texture != prev {
+                        let next_buffer_view_start = triangle_vertices_len * 24 * 3;
+                        buffer_view_count.push(triangle_vertices_len * 3);
+
+                        let bvl = root.buffer_views.len();
+                        if bvl > 0 {
+                            root.buffer_views[bvl - 1].byte_length = (next_buffer_view_start as u32) - root.buffer_views[bvl - 1].byte_offset;
+                        }
+
+                        // buffer view
+                        root.buffer_views.push(gltf::BufferView {
+                            buffer: 0,
+                            byte_length: 0,
+                            byte_offset: next_buffer_view_start as u32,
+                            byte_stride: 24,
+                            target: 34962,
+                        });
+
+                        // accessors
+                        let accessors_count = root.accessors.len();
+
+                        // position
+                        root.accessors.push(gltf::Accessor {
+                            buffer_view: bvl,
+                            byte_offset: 0,
+                            component_type: 5126,
+                            count: 0,
+                            max: Some([0.0, 0.0, 0.0]),
+                            min: Some([0.0, 0.0, 0.0]),
+                            normalized: false,
+                            type_: "VEC3".to_string(),
+                        });
+                        // uv
+                        root.accessors.push(gltf::Accessor {
+                            buffer_view: bvl,
+                            byte_offset: 12,
+                            component_type: 5126,
+                            count: 0,
+                            max: None,
+                            min: None,
+                            normalized: false,
+                            type_: "VEC2".to_string(),
+                        });
+                        // colour
+                        root.accessors.push(gltf::Accessor {
+                            buffer_view: bvl,
+                            byte_offset: 20,
+                            component_type: 5121,
+                            count: 0,
+                            max: None,
+                            min: None,
+                            normalized: true,
+                            type_: "VEC4".to_string(),
+                        });
+                        // primitives
+                        root.meshes[0].primitives.push(gltf::Primitive {
+                            attributes: {
+                                let mut map = HashMap::new();
+                                map.insert("POSITION".to_string(), accessors_count);
+                                map.insert("TEXCOORD_0".to_string(), accessors_count+1);
+                                map.insert("COLOR_0".to_string(), accessors_count+2);
+                                map
+                            },
+                            material: current_texture,
+                        });
+
+                        buffer_view_start = next_buffer_view_start;
+                    }
                 },
                 _ => {},
             };
         }
+        buffer_view_count.push(triangle_vertices_len * 3);
 
-        fn write_vertex(triangle_vertices: &mut Vec<u8>, v: &Vertex) {
-            triangle_vertices.append(&mut (v.position.x as f32).to_le_bytes().to_vec());
-            triangle_vertices.append(&mut (v.position.y as f32).to_le_bytes().to_vec());
-            triangle_vertices.append(&mut (v.position.z as f32).to_le_bytes().to_vec());
-            triangle_vertices.append(&mut (0 as f32).to_le_bytes().to_vec());
-            triangle_vertices.append(&mut (0 as f32).to_le_bytes().to_vec());
-            triangle_vertices.push(v.r);
-            triangle_vertices.push(v.g);
-            triangle_vertices.push(v.b);
-            triangle_vertices.push(v.a);
+        for i in 0..root.accessors.len() {
+            // update count
+            let bvl = root.accessors[i].buffer_view;
+            let count = buffer_view_count[bvl + 1] - buffer_view_count[bvl];
+            root.accessors[i].count = count;
+
+            // update min/max for position
+            if root.accessors[i].min.is_some() {
+                let mut max = [-9999.0, -9999.0, -9999.0];
+                let mut min = [9999.0, 9999.0, 9999.0];
+
+                let start_byte = buffer_view_count[bvl] * 24;
+                let end_byte = start_byte + count * 24;
+                let mut buf: &[u8] = &triangle_vertices[start_byte..end_byte];
+                for _ in 0..count {
+                    let x = buf.read_f32::<LittleEndian>().unwrap();
+                    let y = buf.read_f32::<LittleEndian>().unwrap();
+                    let z = buf.read_f32::<LittleEndian>().unwrap();
+                    let _ = buf.read_f32::<LittleEndian>().unwrap();
+                    let _ = buf.read_f32::<LittleEndian>().unwrap();
+                    let _ = buf.read_u32::<LittleEndian>().unwrap();
+                    
+                    min[0] = if x < min[0] { x } else { min[0] };
+                    min[1] = if y < min[1] { y } else { min[1] };
+                    min[2] = if z < min[2] { z } else { min[2] };
+                    max[0] = if x > max[0] { x } else { max[0] };
+                    max[1] = if y > max[1] { y } else { max[1] };
+                    max[2] = if z > max[2] { z } else { max[2] };
+                }
+
+                root.accessors[i].max = Some(max);
+                root.accessors[i].min = Some(min);
+            }
         }
 
-        let triangle_vertices_len = faces.len() * 3;
-        let mut triangle_vertices = Vec::new();
-        for face in &faces {
-            let v = &self.vertex_data.vertices[ face.x as usize ];
-            write_vertex(&mut triangle_vertices, &v);
+        // last bufferView:
+        let bvl = root.buffer_views.len();
+        root.buffer_views[bvl - 1].byte_length = (triangle_vertices_len as u32 * 24 * 3) - root.buffer_views[bvl - 1].byte_offset;
 
-            let v = &self.vertex_data.vertices[ face.y as usize ];
-            write_vertex(&mut triangle_vertices, &v);
-
-            let v = &self.vertex_data.vertices[ face.z as usize ];
-            write_vertex(&mut triangle_vertices, &v);
-        }
+        let triangle_vertices_len = triangle_vertices_len;
+        let triangle_vertices = triangle_vertices;
         let vertex_size = 24u32;
+        let buffer_length = triangle_vertices.len() as u32;
 
-        let buffer_length = (triangle_vertices_len as u32) * vertex_size;
-        let buffer = json::Buffer {
+        root.buffers.push(gltf::Buffer {
             byte_length: buffer_length,
-            extensions: Default::default(),
-            extras: Default::default(),
-            name: None,
-            uri: Some("buffer0.bin".into()),
-        };
-        let buffer_view = json::buffer::View {
-            buffer: json::Index::new(0),
-            byte_length: buffer.byte_length,
-            byte_offset: None,
-            byte_stride: Some(vertex_size),
-            extensions: Default::default(),
-            extras: Default::default(),
-            name: None,
-            target: Some(Valid(json::buffer::Target::ArrayBuffer)),
-        };
-        let positions = json::Accessor {
-            buffer_view: Some(json::Index::new(0)),
-            byte_offset: Some(0),
-            count: triangle_vertices_len as u32,
-            component_type: Valid(json::accessor::GenericComponentType(
-                json::accessor::ComponentType::F32,
-            )),
-            extensions: Default::default(),
-            extras: Default::default(),
-            type_: Valid(json::accessor::Type::Vec3),
-            min: Some(json::Value::from(Vec::from(min))),
-            max: Some(json::Value::from(Vec::from(max))),
-            name: None,
-            normalized: false,
-            sparse: None,
-        };
-        let textures = json::Accessor {
-            buffer_view: Some(json::Index::new(0)),
-            byte_offset: Some(12u32),
-            count: triangle_vertices_len as u32,
-            component_type: Valid(json::accessor::GenericComponentType(
-                json::accessor::ComponentType::F32,
-            )),
-            extensions: Default::default(),
-            extras: Default::default(),
-            type_: Valid(json::accessor::Type::Vec2),
-            min: None,
-            max: None,
-            name: None,
-            normalized: false,
-            sparse: None,
-        };
-        let colors = json::Accessor {
-            buffer_view: Some(json::Index::new(0)),
-            byte_offset: Some(20u32),
-            count: triangle_vertices_len as u32,
-            component_type: Valid(json::accessor::GenericComponentType(
-                json::accessor::ComponentType::U8,
-            )),
-            extensions: Default::default(),
-            extras: Default::default(),
-            type_: Valid(json::accessor::Type::Vec4),
-            min: None,
-            max: None,
-            name: None,
-            normalized: true,
-            sparse: None,
-        };
+            uri: "buffer0.bin".to_string(),
+        });
 
-        let primitive = json::mesh::Primitive {
-            attributes: {
-                let mut map = std::collections::BTreeMap::new();
-                map.insert(Valid(json::mesh::Semantic::Positions), json::Index::new(0));
-                map.insert(Valid(json::mesh::Semantic::TexCoords(0)), json::Index::new(1));
-                map.insert(Valid(json::mesh::Semantic::Colors(0)), json::Index::new(2));
-                map
-            },
-            extensions: Default::default(),
-            extras: Default::default(),
-            indices: None,
-            material: None,
-            mode: Valid(json::mesh::Mode::Triangles),
-            targets: None,
-        };
-
-        let mesh = json::Mesh {
-            extensions: Default::default(),
-            extras: Default::default(),
-            name: None,
-            primitives: vec![primitive],
-            weights: None,
-        };
-
-        let node = json::Node {
-            camera: None,
-            children: None,
-            extensions: Default::default(),
-            extras: Default::default(),
-            matrix: None,
-            mesh: Some(json::Index::new(0)),
-            name: None,
-            rotation: None,
-            scale: None,
-            translation: None,
-            skin: None,
-            weights: None,
-        };
-
-        let root = json::Root {
-            accessors: vec![positions, textures, colors],
-            buffers: vec![buffer],
-            buffer_views: vec![buffer_view],
-            meshes: vec![mesh],
-            nodes: vec![node],
-            scenes: vec![json::Scene {
-                extensions: Default::default(),
-                extras: Default::default(),
-                name: None,
-                nodes: vec![json::Index::new(0)],
-            }],
-            ..Default::default()
-        };
         let writer = File::create(format!("{}/model.gltf", output_dir)).unwrap();
-        json::serialize::to_writer_pretty(writer, &root).unwrap();
+        serde_json::to_writer_pretty(writer, &root).unwrap();
 
         let mut writer = File::create(format!("{}/buffer0.bin", output_dir)).unwrap();
         writer.write_all(&triangle_vertices).unwrap();
@@ -1674,8 +1967,7 @@ fn read_command(f: &mut File) -> std::io::Result<F3dex> {
         },
         0xFD => {
             let flags = f.read_u8()?;
-            let padding = f.read_u8()?; assert_eq!(padding, 0);
-            let unk = f.read_u8()?;
+            let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
             let address = f.read_u32::<BigEndian>()?;
 
             let format = match flags >> 5 {
@@ -1689,7 +1981,7 @@ fn read_command(f: &mut File) -> std::io::Result<F3dex> {
 
             let depth = 4 * 2u8.pow(((flags >> 3) & 0b11) as u32);
 
-            F3dex::SettImg { format, depth, address, unk }
+            F3dex::SettImg { format, depth, address }
         },
         _ => panic!("Unknown F3DEX command 0x{:X}", cmd),
     };
@@ -1872,7 +2164,7 @@ fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
             f.write_u16::<BigEndian>(*unk2)?;
             f.write_u32::<BigEndian>(*unk3)?;
         },
-        F3dex::SettImg { format, depth, address, unk } => {
+        F3dex::SettImg { format, depth, address } => {
             let format = match *format {
                 ColourFormat::Rgba => 0,
                 ColourFormat::Yuv => 1,
@@ -1885,8 +2177,7 @@ fn write_command(f: &mut File, cmd: &F3dex) -> std::io::Result<()> {
 
             f.write_u8(0xFD)?;
             f.write_u8(flags)?;
-            f.write_u8(0)?;
-            f.write_u8(*unk)?;
+            f.write_u16::<BigEndian>(0)?;
             f.write_u32::<BigEndian>(*address)?;
         },
     };
