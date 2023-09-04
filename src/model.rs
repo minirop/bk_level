@@ -1091,8 +1091,8 @@ impl Model {
                         let green_r = ((palette[right * 2] & 0x07) << 5) + ((palette[right * 2 + 1] & 0xC0) >> 3);
                         let blue_l = (palette[left * 2 + 1] & 0x3E) << 2;
                         let blue_r = (palette[right * 2 + 1] & 0x3E) << 2;
-                        let alpha_l = if palette[left * 2 + 1] & 1 == 1 { 255u8 } else { 0u8 };
-                        let alpha_r = if palette[right * 2 + 1] & 1 == 1 { 255u8 } else { 0u8 };
+                        let alpha_l = if (palette[left * 2 + 1] & 1) == 1 { 255u8 } else { 0u8 };
+                        let alpha_r = if (palette[right * 2 + 1] & 1) == 1 { 255u8 } else { 0u8 };
 
                         pixels.push(red_l);
                         pixels.push(green_l);
@@ -1121,6 +1121,10 @@ impl Model {
                         pixels16_index += 2;
                     }
                 }
+            },
+            TextureFormat::Rgba32 => {
+                let mut data = data.clone();
+                pixels.append(&mut data);
             },
             TextureFormat::IA8 => {
                 let pixels16 = &data[..];
@@ -1208,7 +1212,13 @@ impl Model {
                     },
                     metallic_factor: 0.0,
                 },
-                alpha_mode: "BLEND".to_string(),
+                alpha_mode: match texture.format {
+                    TextureFormat::Rgba16
+                    | TextureFormat::Rgba32
+                    | TextureFormat::C4
+                    | TextureFormat::C8  => "BLEND".to_string(),
+                    TextureFormat::IA8 => "OPAQUE".to_string(),
+                },
             });
         }
 
