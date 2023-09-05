@@ -1155,7 +1155,7 @@ impl Model {
         texture_output_path
     }
 
-    pub fn write_gltf(&mut self, output_dir: &str) {
+    pub fn write_gltf(&self, output_dir: &str) {
         let mut root = gltf::Gltf {
             asset: gltf::Asset {
                 version: "2.0".to_string(),

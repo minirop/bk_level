@@ -74,7 +74,7 @@ fn main() {
         },
         InputFormat::Model => {
             match Model::read_bin(filename) {
-                Ok(mut model) => {
+                Ok(model) => {
                     let format = if let Some(format) = args.output { format } else { OutputFormat::Yaml };
                     match format {
                         OutputFormat::Yaml => {
@@ -102,7 +102,7 @@ fn main() {
                     OutputFormat::Gltf => panic!("Can't convert setup file to .gltf"),
                     OutputFormat::Yaml => panic!("Why would you want to convert .yaml to .yaml?"),
                 };
-            } else if let Some(mut model) = Model::read_yaml(filename) {
+            } else if let Some(model) = Model::read_yaml(filename) {
                 let format = if let Some(format) = args.output { format } else { OutputFormat::Bin };
                 match format {
                     OutputFormat::Bin => {
