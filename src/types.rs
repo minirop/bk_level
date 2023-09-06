@@ -4,7 +4,7 @@ use byteorder::ReadBytesExt;
 use serde::{ Serialize, Deserialize };
 use std::fs::File;
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vector3<T> {
     pub x: T,
     pub y: T,

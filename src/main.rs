@@ -2,12 +2,16 @@ use clap::{ Parser, ValueEnum };
 use std::path::Path;
 
 mod types;
+mod gltf;
 
 mod setupfile;
 use setupfile::SetupFile;
 
 mod model;
 use model::Model;
+
+mod anim;
+use anim::Animation;
 
 /// Convert models and level setup files
 #[derive(Parser, Debug)]
@@ -36,6 +40,7 @@ enum OutputFormat {
 enum InputFormat {
     Model,
     Setup,
+    Anim,
     Yaml,
 }
 
@@ -52,10 +57,12 @@ fn main() {
         InputFormat::Setup
     } else if filename.ends_with(".model.bin") {
         InputFormat::Model
+    } else if filename.ends_with(".anim.bin") {
+        InputFormat::Anim
     } else if filename.ends_with(".yaml") {
         InputFormat::Yaml
     } else {
-        panic!("Can't detect the format. Rename the file to .model.bin/.lvl_setup.bin or use the --input argument.");
+        panic!("Can't detect the format. Rename the file to .anim.bin/.model.bin/.lvl_setup.bin or use the --input argument.");
     };
 
     match input {
@@ -90,6 +97,25 @@ fn main() {
                 },
                 Err(e) => panic!("{:?}", e),
             };
+        },
+        InputFormat::Anim => {
+            match Animation::read_bin(filename) {
+                Ok(anim) => {
+                    let format = if let Some(format) = args.output { format } else { OutputFormat::Yaml };
+                    match format {
+                        OutputFormat::Yaml => {
+                            let output_name = format!("{}.yaml", output_name);
+                            anim.write_yaml(&output_name);
+                        },
+                        OutputFormat::Gltf => {
+                            std::fs::create_dir_all(output_name).unwrap();
+                            anim.write_gltf(&output_name);
+                        },
+                        OutputFormat::Bin => panic!("Why would you want to convert .bin to .bin?"),
+                    };
+                },
+                Err(e) => panic!("{:?}", e),
+            }
         },
         InputFormat::Yaml => {
             if let Some(setupfile) = SetupFile::read_yaml(filename) {

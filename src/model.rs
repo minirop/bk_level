@@ -6,6 +6,7 @@
 #![allow(unreachable_code)]
 
 use crate::types::*;
+use crate::gltf;
 use std::collections::HashMap;
 use image::RgbaImage;
 use byteorder::{ ReadBytesExt, BigEndian, WriteBytesExt, LittleEndian };
@@ -17,145 +18,6 @@ use std::io::SeekFrom;
 use std::io::Read;
 use std::io::Write;
 use hex::ToHex;
-
-mod gltf {
-    use std::collections::HashMap;
-    use serde::{ Serialize, Deserialize };
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(untagged)]
-    pub enum Extension {
-        KhrTextureTransform {
-            scale: [f32; 2],
-            offset: [f32; 2],
-            rotation: f32,
-        },
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Gltf {
-        pub asset: Asset,
-        pub accessors: Vec<Accessor>,
-        pub buffers: Vec<Buffer>,
-        pub buffer_views: Vec<BufferView>,
-        pub images: Vec<Image>,
-        pub materials: Vec<Material>,
-        pub meshes: Vec<Mesh>,
-        pub nodes: Vec<Node>,
-        pub samplers: Vec<Sampler>,
-        pub scenes: Vec<Scene>,
-        pub textures: Vec<Texture>,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Accessor {
-        pub buffer_view: usize,
-        pub byte_offset: u32,
-        pub component_type: u32,
-        pub count: usize,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub max: Option<[f32; 3]>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub min: Option<[f32; 3]>,
-        pub normalized: bool,
-        #[serde(rename(serialize = "type", deserialize = "type"))]
-        pub type_: String,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Asset {
-        pub generator: String,
-        pub version: String,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Buffer {
-        pub byte_length: u32,
-        pub uri: String,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct BufferView {
-        pub buffer: usize,
-        pub byte_length: u32,
-        pub byte_offset: u32,
-        pub byte_stride: u32,
-        pub target: usize,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Image {
-        pub uri: String,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Material {
-        pub pbr_metallic_roughness: PbrMetallicRoughness,
-        pub alpha_mode: String,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Mesh {
-        pub primitives: Vec<Primitive>,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Node {
-        pub mesh: usize,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct PbrMetallicRoughness {
-        pub base_color_texture: TextureInfo,
-        pub metallic_factor: f32,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Primitive {
-        pub attributes: HashMap<String, usize>,
-        pub material: usize,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Sampler {
-        pub mag_filter: u32,
-        pub min_filter: u32,
-        pub wrap_s: u32,
-        pub wrap_t: u32,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Scene {
-        pub nodes: Vec<usize>,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Texture {
-        pub sampler: usize,
-        pub source: usize,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct TextureInfo {
-        pub index: usize,
-        pub extensions: HashMap<String, Extension>,
-    }
-}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
@@ -325,15 +187,15 @@ pub struct ModelUnk28 {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AnimationList {
-    unk: f32,
+    translation_factor: f32,
     animations: Vec<Animation>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Animation {
-    unk: Vector3<f32>,
+    position: Vector3<f32>,
     bone: i16,
-    mtx: i16,
+    parent: i16,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -713,23 +575,23 @@ impl Model {
         if animation_setup > 0 {
             assert_eq!(animation_setup as u64, f.seek(SeekFrom::Current(0))?);
 
-            let unk = f.read_f32::<BigEndian>()?;
+            let translation_factor = f.read_f32::<BigEndian>()?;
             let count = f.read_u16::<BigEndian>()?;
             let padding = f.read_u16::<BigEndian>()?; assert_eq!(padding, 0);
 
             let mut animations = vec![];
             for _ in 0..count {
-                let unk = read_3_floats(&mut f);
+                let position = read_3_floats(&mut f);
                 let bone = f.read_i16::<BigEndian>()?;
-                let mtx = f.read_i16::<BigEndian>()?;
+                let parent = f.read_i16::<BigEndian>()?;
 
                 animations.push(Animation {
-                    unk, bone, mtx
+                    position, bone, parent
                 });
             }
 
             animation_list = Some(AnimationList {
-                unk, animations
+                translation_factor, animations
             });
         }
 
@@ -998,14 +860,14 @@ impl Model {
         if let Some(animation_list) = &self.animation_list {
             animation_setup = f.seek(SeekFrom::Current(0))? as u32;
 
-            f.write_f32::<BigEndian>(animation_list.unk)?;
+            f.write_f32::<BigEndian>(animation_list.translation_factor)?;
             f.write_u16::<BigEndian>(animation_list.animations.len() as u16)?;
             f.write_u16::<BigEndian>(0)?;
 
             for anim in &animation_list.animations {
-                write_3_floats(&mut f, &anim.unk);
+                write_3_floats(&mut f, &anim.position);
                 f.write_i16::<BigEndian>(anim.bone)?;
-                f.write_i16::<BigEndian>(anim.mtx)?;
+                f.write_i16::<BigEndian>(anim.parent)?;
             }
         }
 
@@ -1162,6 +1024,7 @@ impl Model {
                 generator: "bk_level".to_string(),
             },
             accessors: vec![],
+            animations: vec![],
             buffers: vec![],
             buffer_views: vec![],
             images: vec![],
@@ -1170,7 +1033,9 @@ impl Model {
                 primitives: vec![],
             }],
             nodes: vec![gltf::Node {
-                mesh: 0,
+                mesh: Some(0),
+                children: vec![],
+                translation: None,
             }],
             samplers: vec![gltf::Sampler {
                 mag_filter: 9728,
@@ -1258,6 +1123,7 @@ impl Model {
         let mut buffer_view_count = vec![];
 
         for cmd in &self.commands {
+            println!("{:?}", cmd);
             match cmd {
                 F3dex::Vertex { index, count, address } => {
                     let address = (*address & 0xFFFFFF) / 16;
@@ -1418,7 +1284,6 @@ impl Model {
             }
         }
 
-        // last bufferView:
         let bvl = root.buffer_views.len();
         root.buffer_views[bvl - 1].byte_length = (triangle_vertices_len as u32 * 24 * 3) - root.buffer_views[bvl - 1].byte_offset;
 
@@ -1431,6 +1296,22 @@ impl Model {
             byte_length: buffer_length,
             uri: "buffer0.bin".to_string(),
         });
+
+        if let Some(skeleton) = &self.animation_list {
+            for (id, bone) in skeleton.animations.iter().enumerate() {
+                root.nodes.push(gltf::Node {
+                    mesh: None,
+                    children: vec![],
+                    translation: Some([bone.position.x, bone.position.y, bone.position.z]),
+                });
+
+                if bone.parent != -1 {
+                    assert!(((bone.parent + 1) as usize) < root.nodes.len());
+
+                    root.nodes[(bone.parent + 1) as usize].children.push(id);
+                }
+            }
+        }
 
         let writer = File::create(format!("{}/model.gltf", output_dir)).unwrap();
         serde_json::to_writer_pretty(writer, &root).unwrap();
